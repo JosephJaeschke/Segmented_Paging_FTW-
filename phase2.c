@@ -2,13 +2,22 @@
 #include <stdio.h>
 #include <unistd.h>
 #include <string.h>
+#include <signal.h>
+#include <malloc.h>
 #include "mem.h"
 
+#define malloc(x) myallocate(x,__FILE__,__LINE__,0);
+#define free(x) mydeallocate(x,__FILE__,__LINE__,0);
 #define VER 987
 
-char mem[8000000];
+char* mem;
 int init=0;
-memHeader m;
+struct sigaction sa;
+
+static void handler(int signum,siginfo_t* si,void* unused)
+{
+	printf("Got SIGSEGV @ addr 0x%lx\n",(long)si->si_addr);
+}
 
 int abs(int a)
 {
@@ -24,7 +33,15 @@ char* myallocate(size_t size,char* file,int line,int type)
 	size+=sizeof(memHeader);
 	if(init==0)
 	{
-		printf("mem: %p-%p\n",mem,mem+sizeof(mem));
+		mem=(char*)memalign(sysconf(_SC_PAGE_SIZE),8000000);
+		sa.sa_flags=SA_SIGINFO;
+		sigemptyset(&sa.sa_mask);
+		sa.sa_sigaction=handler;
+		if(sigaction(SIGSEGV,&sa,NULL)==-1)
+		{
+			printf("Fatal error in signal handler setup\n");
+			exit(EXIT_FAILURE);
+		}
 		memHeader h;
 		h.free=0;
 		h.next=mem+size;
@@ -36,7 +53,6 @@ char* myallocate(size_t size,char* file,int line,int type)
 		rest.next=mem+sizeof(mem); 
 		rest.prev=mem;
 		rest.verify=VER;
-		m=rest;
 		memcpy((void*)mem+size,(void*)&rest,sizeof(memHeader));
 		init=1;
 		return mem+sizeof(memHeader);
@@ -77,30 +93,22 @@ char* myallocate(size_t size,char* file,int line,int type)
 
 void coalesce(char* ptr)
 {
-	printf("-in coal\n");
 	memHeader* nxt=(memHeader*)((memHeader*)ptr)->next;
 	memHeader* prv=(memHeader*)((memHeader*)ptr)->prev;
-	printf("prv:%p\n",(((memHeader*)ptr)->prev));
-	fflush(stdout);
 	if(prv==NULL&&(char*)nxt==mem+sizeof(mem))
 	{
 		return;
 	}
 	else if(prv!=NULL&&(char*)nxt!=mem+sizeof(mem))
 	{
-		printf("--i\n");
 		if(prv->free==0&&nxt->free==0)
 		{
 			return;
 		}
-		printf("--i1\n");
-		fflush(stdout);
 		if(nxt->free!=0)
 		{
 			((memHeader*)ptr)->next=nxt->next;
 		}
-		printf("--i2\n");
-		fflush(stdout);
 		if(prv->free!=0)
 		{
 			prv->next=((memHeader*)ptr)->next;
@@ -111,7 +119,6 @@ void coalesce(char* ptr)
 	}
 	else if((char*)nxt==mem+sizeof(mem))
 	{
-		printf("--j\n");
 		if(prv->free!=0)
 		{
 			prv->next=((memHeader*)ptr)->next;
@@ -122,7 +129,6 @@ void coalesce(char* ptr)
 	}
 	else if(prv==NULL)
 	{
-		printf("--k %p\n",nxt);
 		if(nxt->free!=0)
 		{
 			((memHeader*)ptr)->next=nxt->next;
@@ -139,6 +145,7 @@ void mydeallocate(char* ptr,char* file,int line,int type)
 	if(((memHeader*)((void*)ptr-sizeof(memHeader)))->verify!=VER)
 	{
 		printf("ERROR: Not pointing to void addr\n");
+		return;
 	}
 	((memHeader*)((void*)ptr-sizeof(memHeader)))->free=1;
 	coalesce(((char*)(void*)ptr-sizeof(memHeader)));
@@ -147,24 +154,12 @@ void mydeallocate(char* ptr,char* file,int line,int type)
 
 int main()
 {
-	short* t=(short*)myallocate(sizeof(short),__FILE__,__LINE__,0);
-	printf("alloced 1\n");
-	short* s=(short*)myallocate(sizeof(short),__FILE__,__LINE__,0);
-	printf("alloced 2\n");
-	short* sh=s;
-	*sh=8;
-	printf("*sh=%d\n",*sh);
-	short* p=(short*)myallocate(sizeof(short),__FILE__,__LINE__,0);
-	printf("alloced 3\n");
-	mydeallocate((char*)t,__FILE__,__LINE__,0);
-	printf("-\n");
-	printf("2 prev after dealloc %p\n",((memHeader*)((void*)s-sizeof(memHeader)))->prev);
-	fflush(stdout);
-	mydeallocate((char*)s,__FILE__,__LINE__,0);
-	printf("--\n");
-	fflush(stdout);
-	mydeallocate((char*)p,__FILE__,__LINE__,0);
-	printf("---\n");
-	printf("%p\n",((memHeader*)mem)->next);
-	fflush(stdout);
+	printf("mem: %p-%p\n",mem,mem+sizeof(mem));
+	short* t=(short*)malloc(sizeof(short));
+	short* temp=t;
+	short x=888;
+	t=&x;
+	printf("Here it is:%d\n",*t);
+	t=temp;
+	free((char*)t);
 }

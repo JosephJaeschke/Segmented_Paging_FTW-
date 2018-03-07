@@ -1,4 +1,4 @@
 all:
-	gcc -o phase1 phase1.c
+	gcc -o phase2 phase2.c
 clean:
-	rm phase1
+	rm phase2
