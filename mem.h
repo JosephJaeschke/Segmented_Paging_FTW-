@@ -1,9 +1,12 @@
 typedef struct memHeader_
 {
+	int tid;
+	int pageNum;
 	short verify;
 	char* next;
 	char* prev;
 	int free:1;
+	int id;
 } memHeader;
 
 typedef struct memBlock_
