@@ -6,6 +6,9 @@
 
 #define VER 987
 
+//obligatory test comment to make sure I can use git correctly
+//I DID ANOTHER THING!!
+
 char mem[8000000];
 int init=0;
 memHeader m;
