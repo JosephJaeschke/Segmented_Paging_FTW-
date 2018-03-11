@@ -20,6 +20,7 @@ int id=1;
 static void handler(int signum,siginfo_t* si,void* unused)
 {
 	printf("Got SIGSEGV @ addr 0x%lx\n",(long)si->si_addr);
+	return;
 }
 
 int abs(int a)
@@ -37,6 +38,7 @@ char* myallocate(size_t size,char* file,int line,int type)
 	if(meminit==0)
 	{
 		mem=(char*)memalign(sysconf(_SC_PAGE_SIZE),8000000);
+		
 		sa.sa_flags=SA_SIGINFO;
 		sigemptyset(&sa.sa_mask);
 		sa.sa_sigaction=handler;
@@ -58,8 +60,9 @@ char* myallocate(size_t size,char* file,int line,int type)
 		rest.next=mem+_SC_PAGE_SIZE;
 		rest.id=type;//CHANGE THIS FOR THREAD ID
 		memcpy((void*)mem,(void*)&rest,sizeof(memHeader));
+		meminit = 1; //I dunno if this belongs here or somewhere else, but I figured we should switch the value of meminit so it doesn't always come here on calls to myallocate() and I didn't see it anywhere else.
 	}
-	if(type!=0)
+	if(type==0)
 	{
 		//non-system request for mem
 		//add start index for non-system mem (ie don't start looking at 0)
@@ -189,19 +192,34 @@ void coalesce(char* ptr)
 void mydeallocate(char* ptr,char* file,int line,int type)
 {
 	printf("ver=%d\n",((memHeader*)((void*)ptr-sizeof(memHeader)))->verify   );
-	//printf("in dealloc %p\n",((memHeader*)((void*)ptr-sizeof(memHeader)))->next);
-	if(((memHeader*)((void*)ptr-sizeof(memHeader)))->verify!=VER)
+	printf("in dealloc %p\n",((memHeader*)((void*)ptr-sizeof(memHeader)))->next);
+	
+	if (type==0)
 	{
-		printf("ERROR: Not pointing to void addr\n");
-		return;
+		//non-system request for free
+		//make sure they are askng to free a valid ptr
+		printf("non-sys free call\n");	
+		if(((memHeader*)((void*)ptr-sizeof(memHeader)))->verify!=VER)
+		{
+			printf("ERROR: Not pointing to void addr\n");
+			return;
+		}
+		if(((memHeader*)((void*)ptr-sizeof(memHeader)))->id!=type)//change for TID
+		{
+			printf("ERROR: You do not own this memory\n");
+			return;
+		}
+		((memHeader*)((void*)ptr-sizeof(memHeader)))->free=1;
+		((memHeader*)((void*)ptr-sizeof(memHeader)))->id = 0;
+		//is this all that needs to be changd on a free call? 
+		//just to mark the mem pointer as free??
+		coalesce(((char*)(void*)ptr-sizeof(memHeader)));
 	}
-	if(((memHeader*)((void*)ptr-sizeof(memHeader)))->id!=type)//change for TID
+	else
 	{
-		printf("ERROR: You do not own this memory\n");
-		return;
+		//sys wants to free mem
+		//don't know if sys is allowed to free usr mem or not??
 	}
-	((memHeader*)((void*)ptr-sizeof(memHeader)))->free=1;
-	coalesce(((char*)(void*)ptr-sizeof(memHeader)));
 	return;
 }
 
@@ -212,7 +230,8 @@ int main()
 	short* temp=t;
 	short x=888;
 	t=&x;
-	printf("Here it is:%d\n",*t);
-	t=temp;
+	printf("Here it is:%d\n", *t);
+	//t=temp;
 	free((char*)t);
+	//printf("Is it still here?%d\n", *t);
 }

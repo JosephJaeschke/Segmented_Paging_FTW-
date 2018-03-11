@@ -32,7 +32,7 @@
 #include <ucontext.h>
 #include <signal.h>
 
-//typedef uint my_pthread_t;
+typedef uint my_pthread_t;
 
 typedef struct threadControlBlock 
 {
