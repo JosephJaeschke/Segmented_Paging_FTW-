@@ -64,7 +64,7 @@ char* myallocate(size_t size,char* file,int line,int type)
 		h.prev=NULL;
 		h.next=mem+size;
 		h.verify=VER;
-		h.id=type;//CHANGE THIS FOR THREAD ID
+		h.id=id;//CHANGE THIS FOR THREAD ID
 		memcpy((void*)mem,(void*)&h,sizeof(memHeader));
 		memHeader rest;
 		rest.free=1;
@@ -72,13 +72,13 @@ char* myallocate(size_t size,char* file,int line,int type)
 		rest.next=mem+_SC_PAGE_SIZE;
 		rest.id=type;//CHANGE THIS FOR THREAD ID
 		memcpy((void*)mem,(void*)&rest,sizeof(memHeader));
-		meminit = 1; //I dunno if this belongs here or somewhere else, but I figured we should switch the value of meminit so it doesn't always come here on calls to myallocate() and I didn't see it anywhere else.
+		meminit=1;
 	}
 	if(type!=0)
 	{
 		//non-system request for mem
 		//add start index for non-system mem (ie don't start looking at 0)
-		char* ptr=mem;
+		char* ptr=mem+MEM_STRT;
 		while(ptr!=mem+MEM_SIZE)
 		{
 			printf("-");
@@ -128,7 +128,7 @@ char* myallocate(size_t size,char* file,int line,int type)
 				new.prev=NULL;
 				new.next=ptr+size;
 				new.verify=VER;
-				new.id=type;//CHANGE FOR THREAD ID
+				new.id=id;//CHANGE FOR THREAD ID
 				memcpy((void*)ptr,(void*)&new,sizeof(memHeader));
 				memHeader rest;
 				rest.free=1;
