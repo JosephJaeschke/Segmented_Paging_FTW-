@@ -39,14 +39,14 @@ char* myallocate(size_t size,char* file,int line,int type)
 	{
 		mem=(char*)memalign(sysconf(_SC_PAGE_SIZE),8000000);
 		
-		sa.sa_flags=SA_SIGINFO;
-		sigemptyset(&sa.sa_mask);
-		sa.sa_sigaction=handler;
-		if(sigaction(SIGSEGV,&sa,NULL)==-1)
-		{
-			printf("Fatel error in signal handler setup\n");
-			exit(EXIT_FAILURE);
-		}
+		//sa.sa_flags=SA_SIGINFO;
+		//sigemptyset(&sa.sa_mask);
+		//sa.sa_sigaction=handler;
+		//if(sigaction(SIGSEGV,&sa,NULL)==-1)
+		//{
+		//	printf("Fatel error in signal handler setup\n");
+		//	exit(EXIT_FAILURE);
+		//}
 		memHeader h;
 		h.free=1;
 		h.prev=NULL;
@@ -231,7 +231,7 @@ int main()
 	short x=888;
 	t=&x;
 	printf("Here it is:%d\n", *t);
-	//t=temp;
+	t=temp;
 	free((char*)t);
 	//printf("Is it still here?%d\n", *t);
 }
