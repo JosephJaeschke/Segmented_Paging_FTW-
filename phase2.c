@@ -51,14 +51,14 @@ char* myallocate(size_t size,char* file,int line,int type)
 		mem=(char*)memalign(sysconf(_SC_PAGE_SIZE),MEM_SIZE);
 		bzero(mem,MEM_SIZE);
 		printf("-0\n");	
-		sa.sa_flags=SA_SIGINFO;
-		sigemptyset(&sa.sa_mask);
-		sa.sa_sigaction=handler;
-		if(sigaction(SIGSEGV,&sa,NULL)==-1)
-		{
-			printf("Fatel error in signal handler setup\n");
-			exit(EXIT_FAILURE);
-		}
+		//sa.sa_flags=SA_SIGINFO;
+		//sigemptyset(&sa.sa_mask);
+		//sa.sa_sigaction=handler;
+		//if(sigaction(SIGSEGV,&sa,NULL)==-1)
+		//{
+		//	printf("Fatel error in signal handler setup\n");
+		//	exit(EXIT_FAILURE);
+		//}
 		memHeader h;
 		h.free=1;
 		h.prev=NULL;
@@ -208,7 +208,7 @@ void coalesce(char* ptr)
 void mydeallocate(char* ptr,char* file,int line,int type)
 {
 	printf("ver=%d\n",((memHeader*)(ptr-sizeof(memHeader)))->verify   );
-	printf("in dealloc %p\n",((memHeader*)(ptr-sizeof(memHeader)))->next);
+	printf("in dealloc %p - %p\n", ptr, ((memHeader*)(ptr-sizeof(memHeader)))->next);
 	
 	if (type==0)
 	{
@@ -228,6 +228,7 @@ void mydeallocate(char* ptr,char* file,int line,int type)
 		}
 		((memHeader*)(ptr-sizeof(memHeader)))->free=1;
 		((memHeader*)(ptr-sizeof(memHeader)))->id = 0;
+		bzero(ptr, ((((memHeader*)(ptr-sizeof(memHeader)))->next) - ptr)),  
 		//is this all that needs to be changd on a free call? 
 		//just to mark the mem pointer as free??
 		coalesce(ptr-sizeof(memHeader));
@@ -243,13 +244,14 @@ void mydeallocate(char* ptr,char* file,int line,int type)
 int main()
 {
 	short* t=(short*)myallocate(sizeof(short),__FILE__,__LINE__,6);
+	//printf("size of short: %d, size of mem: %d\n", sizeof(short), (0xaa-0xa8));
 	printf("mem: %p-%p\n",mem,mem+MEM_SIZE);
 	printf("=\n");
-	//short* temp=t;
-	//short x=888;
-	//t=&x;
-	//printf("Here it is:%p\n", t);
-	//t=temp;
+	short* temp=t;
+	short x=888;
+	t=&x;
+	printf("Here it is at %p: %d\n", t, *t);
+	t=temp;
 	free((char*)t);
-	//printf("Is it still here?%d\n", *t);
+	printf("Is it still here?%d\n", *t); //should segfault here, no longer have access to this
 }
