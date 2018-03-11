@@ -228,8 +228,10 @@ void mydeallocate(char* ptr,char* file,int line,int type)
 		}
 		((memHeader*)(ptr-sizeof(memHeader)))->free=1;
 		((memHeader*)(ptr-sizeof(memHeader)))->id = 0;
-		bzero(ptr, ((((memHeader*)(ptr-sizeof(memHeader)))->next) - ptr)),  
-		//is this all that needs to be changd on a free call? 
+		printf("clearing mem\n");
+		bzero(ptr, ((((memHeader*)(ptr-sizeof(memHeader)))->next) - ptr)),
+		printf("mem clear\n");  
+		//is this all that needs to be changed on a free call? 
 		//just to mark the mem pointer as free??
 		coalesce(ptr-sizeof(memHeader));
 	}
@@ -250,8 +252,9 @@ int main()
 	short* temp=t;
 	short x=888;
 	t=&x;
-	printf("Here it is at %p: %d\n", t, *t);
+	printf("Here it is at %p: %d\n", temp, *t);
 	t=temp;
 	free((char*)t);
-	printf("Is it still here?%d\n", *t); //should segfault here, no longer have access to this
+	printf("Is it still here?\n"); 
+	printf("%d\n", *t);//should segfault here, no longer have access to this
 }
