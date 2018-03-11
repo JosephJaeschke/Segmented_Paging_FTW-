@@ -37,8 +37,8 @@ char* myallocate(size_t size,char* file,int line,int type)
 	size+=sizeof(memHeader);
 	if(meminit==0)
 	{
-		mem=(char*)memalign(sysconf(_SC_PAGE_SIZE),8000000);
-		
+		mem=(char*)memalign(sysconf(_SC_PAGE_SIZE),8);
+		printf("-0\n");	
 		//sa.sa_flags=SA_SIGINFO;
 		//sigemptyset(&sa.sa_mask);
 		//sa.sa_sigaction=handler;
@@ -62,7 +62,7 @@ char* myallocate(size_t size,char* file,int line,int type)
 		memcpy((void*)mem,(void*)&rest,sizeof(memHeader));
 		meminit = 1; //I dunno if this belongs here or somewhere else, but I figured we should switch the value of meminit so it doesn't always come here on calls to myallocate() and I didn't see it anywhere else.
 	}
-	if(type==0)
+	if(type!=0)
 	{
 		//non-system request for mem
 		//add start index for non-system mem (ie don't start looking at 0)
@@ -71,6 +71,7 @@ char* myallocate(size_t size,char* file,int line,int type)
 		{
 			if(((memHeader*)ptr)->id==type)
 			{
+				printf("1\n");
 				//found its page!!
 				int best=_SC_PAGE_SIZE;
 				char* temp=ptr;
@@ -108,6 +109,7 @@ char* myallocate(size_t size,char* file,int line,int type)
 			}
 			else if(((memHeader*)ptr)->id==0)
 			{
+				printf("2\n");
 				//found free page!!
 				memHeader new;
 				new.free=0;
@@ -127,9 +129,11 @@ char* myallocate(size_t size,char* file,int line,int type)
 			}
 			else
 			{
+				printf("-");
 				ptr+=_SC_PAGE_SIZE;
 			}
 		}
+		printf("3\n");
 		//no free pages
 		return NULL;
 	}
@@ -225,13 +229,14 @@ void mydeallocate(char* ptr,char* file,int line,int type)
 
 int main()
 {
+	short* t=(short*)myallocate(sizeof(short),__FILE__,__LINE__,3);
 	printf("mem: %p-%p\n",mem,mem+sizeof(mem));
-	short* t=(short*)malloc(sizeof(short));
-	short* temp=t;
-	short x=888;
-	t=&x;
-	printf("Here it is:%d\n", *t);
-	t=temp;
+	printf("=\n");
+	//short* temp=t;
+	//short x=888;
+	//t=&x;
+	//printf("Here it is:%p\n", t);
+	//t=temp;
 	free((char*)t);
 	//printf("Is it still here?%d\n", *t);
 }
