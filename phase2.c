@@ -10,6 +10,8 @@
 #define malloc(x) myallocate(x,__FILE__,__LINE__,0);
 #define free(x) mydeallocate(x,__FILE__,__LINE__,0);
 #define VER 987
+#define MEM_SIZE 8000000
+#define MEM_STRT 2000000 //start of non-system memory
 
 char* mem;
 int meminit=0;
@@ -19,7 +21,16 @@ int id=1;
 
 static void handler(int signum,siginfo_t* si,void* unused)
 {
-	printf("Got SIGSEGV @ addr 0x%lx\n",(long)si->si_addr);
+	//printf("Got SIGSEGV @ addr 0x%lx\n",(long)si->si_addr);
+	if((char*)si->si_addr>=mem&&(char*)si->si_addr<=mem+MEM_SIZE)
+	{
+		//in memory so fix it
+	}
+	else
+	{
+		//real segfault
+		exit(EXIT_FAILURE); //didn't specify what to do
+	}
 	return;
 }
 
@@ -37,16 +48,17 @@ char* myallocate(size_t size,char* file,int line,int type)
 	size+=sizeof(memHeader);
 	if(meminit==0)
 	{
-		mem=(char*)memalign(sysconf(_SC_PAGE_SIZE),8);
+		mem=(char*)memalign(sysconf(_SC_PAGE_SIZE),MEM_SIZE);
+		bzero(mem,MEM_SIZE);
 		printf("-0\n");	
-		//sa.sa_flags=SA_SIGINFO;
-		//sigemptyset(&sa.sa_mask);
-		//sa.sa_sigaction=handler;
-		//if(sigaction(SIGSEGV,&sa,NULL)==-1)
-		//{
-		//	printf("Fatel error in signal handler setup\n");
-		//	exit(EXIT_FAILURE);
-		//}
+		sa.sa_flags=SA_SIGINFO;
+		sigemptyset(&sa.sa_mask);
+		sa.sa_sigaction=handler;
+		if(sigaction(SIGSEGV,&sa,NULL)==-1)
+		{
+			printf("Fatel error in signal handler setup\n");
+			exit(EXIT_FAILURE);
+		}
 		memHeader h;
 		h.free=1;
 		h.prev=NULL;
@@ -67,11 +79,11 @@ char* myallocate(size_t size,char* file,int line,int type)
 		//non-system request for mem
 		//add start index for non-system mem (ie don't start looking at 0)
 		char* ptr=mem;
-		while(ptr!=mem+sizeof(mem))
+		while(ptr!=mem+MEM_SIZE)
 		{
-			if(((memHeader*)ptr)->id==type)
+			printf("-");
+			if(((memHeader*)ptr)->id==id)
 			{
-				printf("1\n");
 				//found its page!!
 				int best=_SC_PAGE_SIZE;
 				char* temp=ptr;
@@ -150,11 +162,11 @@ void coalesce(char* ptr)
 {
 	memHeader* nxt=(memHeader*)((memHeader*)ptr)->next;
 	memHeader* prv=(memHeader*)((memHeader*)ptr)->prev;
-	if(prv==NULL&&(char*)nxt==mem+sizeof(mem))
+	if(prv==NULL&&(char*)nxt==mem+MEM_SIZE)
 	{
 		return;
 	}
-	else if(prv!=NULL&&(char*)nxt!=mem+sizeof(mem))
+	else if(prv!=NULL&&(char*)nxt!=mem+MEM_SIZE)
 	{
 		if(prv->free==0&&nxt->free==0)
 		{
@@ -172,7 +184,7 @@ void coalesce(char* ptr)
 		}
 		coalesce(ptr);
 	}
-	else if((char*)nxt==mem+sizeof(mem))
+	else if((char*)nxt==mem+MEM_SIZE)
 	{
 		if(prv->free!=0)
 		{
@@ -195,29 +207,30 @@ void coalesce(char* ptr)
 
 void mydeallocate(char* ptr,char* file,int line,int type)
 {
-	printf("ver=%d\n",((memHeader*)((void*)ptr-sizeof(memHeader)))->verify   );
-	printf("in dealloc %p\n",((memHeader*)((void*)ptr-sizeof(memHeader)))->next);
+	printf("ver=%d\n",((memHeader*)(ptr-sizeof(memHeader)))->verify   );
+	printf("in dealloc %p\n",((memHeader*)(ptr-sizeof(memHeader)))->next);
 	
 	if (type==0)
 	{
 		//non-system request for free
 		//make sure they are askng to free a valid ptr
 		printf("non-sys free call\n");	
-		if(((memHeader*)((void*)ptr-sizeof(memHeader)))->verify!=VER)
+		if(((memHeader*)(ptr-sizeof(memHeader)))->verify!=VER)
 		{
 			printf("ERROR: Not pointing to void addr\n");
 			return;
 		}
-		if(((memHeader*)((void*)ptr-sizeof(memHeader)))->id!=type)//change for TID
+		if(((memHeader*)(ptr-sizeof(memHeader)))->id!=id)//change id to curr->tid
 		{
+			printf("%d=%d 1\n",((memHeader*)ptr)->id,type);
 			printf("ERROR: You do not own this memory\n");
 			return;
 		}
-		((memHeader*)((void*)ptr-sizeof(memHeader)))->free=1;
-		((memHeader*)((void*)ptr-sizeof(memHeader)))->id = 0;
+		((memHeader*)(ptr-sizeof(memHeader)))->free=1;
+		((memHeader*)(ptr-sizeof(memHeader)))->id = 0;
 		//is this all that needs to be changd on a free call? 
 		//just to mark the mem pointer as free??
-		coalesce(((char*)(void*)ptr-sizeof(memHeader)));
+		coalesce(ptr-sizeof(memHeader));
 	}
 	else
 	{
@@ -229,8 +242,8 @@ void mydeallocate(char* ptr,char* file,int line,int type)
 
 int main()
 {
-	short* t=(short*)myallocate(sizeof(short),__FILE__,__LINE__,3);
-	printf("mem: %p-%p\n",mem,mem+sizeof(mem));
+	short* t=(short*)myallocate(sizeof(short),__FILE__,__LINE__,6);
+	printf("mem: %p-%p\n",mem,mem+MEM_SIZE);
 	printf("=\n");
 	//short* temp=t;
 	//short x=888;
