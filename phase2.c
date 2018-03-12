@@ -11,13 +11,13 @@
 #define free(x) mydeallocate(x,__FILE__,__LINE__,0);
 #define VER 987
 #define MEM_SIZE 8000000
-#define MEM_STRT 2000000 //start of non-system memory
+#define MEM_STRT 2002944 //first page of non-system memory
 
 char* mem;
 int meminit=0;
 struct sigaction sa;
-int id=1;
-
+int id=1; //equivalent to curr->tid
+memBook segments[1954];
 
 static void handler(int signum,siginfo_t* si,void* unused)
 {
@@ -29,6 +29,7 @@ static void handler(int signum,siginfo_t* si,void* unused)
 	else
 	{
 		//real segfault
+		printf("Segmentation Fault (core dumped)\n");
 		exit(EXIT_FAILURE); //didn't specify what to do
 	}
 	return;
@@ -50,41 +51,49 @@ char* myallocate(size_t size,char* file,int line,int type)
 	{
 		mem=(char*)memalign(sysconf(_SC_PAGE_SIZE),MEM_SIZE);
 		bzero(mem,MEM_SIZE);
-		printf("-0\n");	
-		//sa.sa_flags=SA_SIGINFO;
-		//sigemptyset(&sa.sa_mask);
-		//sa.sa_sigaction=handler;
-		//if(sigaction(SIGSEGV,&sa,NULL)==-1)
-		//{
-		//	printf("Fatel error in signal handler setup\n");
-		//	exit(EXIT_FAILURE);
-		//}
+		printf("-0, %lu\n",sizeof(memHeader));	
+		sa.sa_flags=SA_SIGINFO;
+		sigemptyset(&sa.sa_mask);
+		sa.sa_sigaction=handler;
+		if(sigaction(SIGSEGV,&sa,NULL)==-1)
+		{
+			printf("Fatel error in signal handler setup\n");
+			exit(EXIT_FAILURE);
+		}
 		memHeader h;
 		h.free=1;
 		h.prev=NULL;
 		h.next=mem+size;
 		h.verify=VER;
 		h.id=id;//CHANGE THIS FOR THREAD ID
-		memcpy((void*)mem,(void*)&h,sizeof(memHeader));
+		memcpy(mem+MEM_STRT,&h,sizeof(memHeader));
+		printf("started initing @ %p and h.id=%d\n",mem+MEM_STRT,h.id);
 		memHeader rest;
 		rest.free=1;
 		rest.prev=mem;
-		rest.next=mem+_SC_PAGE_SIZE;
-		rest.id=type;//CHANGE THIS FOR THREAD ID
-		memcpy((void*)mem,(void*)&rest,sizeof(memHeader));
+		rest.next=mem+MEM_STRT+_SC_PAGE_SIZE;
+		rest.id=id;//CHANGE THIS FOR THREAD ID
+		memcpy(mem+MEM_STRT+size-sizeof(memHeader),&rest,sizeof(memHeader));
 		meminit=1;
 	}
 	if(type!=0)
 	{
 		//non-system request for mem
 		//add start index for non-system mem (ie don't start looking at 0)
+		memHeader data;
 		char* ptr=mem+MEM_STRT;
+		printf("start searching @ ptr=%p\n",ptr);
 		while(ptr!=mem+MEM_SIZE)
 		{
 			printf("-");
-			if(((memHeader*)ptr)->id==id)
+			fflush(stdout);
+			memcpy(&data,ptr,sizeof(memHeader));
+			ptr=ptr+_SC_PAGE_SIZE;
+			printf("id:%d\n",data.verify);
+			if(data.id==id)
 			{
 				//found its page!!
+				printf("-1\n");
 				int best=_SC_PAGE_SIZE;
 				char* temp=ptr;
 				memHeader* bestFit=NULL;
@@ -119,7 +128,7 @@ char* myallocate(size_t size,char* file,int line,int type)
 				memcpy((void*)(((void*)bestFit)+size),(void*)&rest,sizeof(memHeader));
 				return (char*)(((void*)bestFit)+sizeof(memHeader));
 			}
-			else if(((memHeader*)ptr)->id==0)
+			else if(data.id==0)
 			{
 				printf("2\n");
 				//found free page!!
@@ -141,11 +150,11 @@ char* myallocate(size_t size,char* file,int line,int type)
 			}
 			else
 			{
-				printf("-");
+		//		printf("-");
 				ptr+=_SC_PAGE_SIZE;
 			}
 		}
-		printf("3\n");
+		//printf("3\n");
 		//no free pages
 		return NULL;
 	}
@@ -160,6 +169,7 @@ char* myallocate(size_t size,char* file,int line,int type)
 
 void coalesce(char* ptr)
 {
+	printf("-c\n");
 	memHeader* nxt=(memHeader*)((memHeader*)ptr)->next;
 	memHeader* prv=(memHeader*)((memHeader*)ptr)->prev;
 	if(prv==NULL&&(char*)nxt==mem+MEM_SIZE)
@@ -196,6 +206,7 @@ void coalesce(char* ptr)
 	}
 	else if(prv==NULL)
 	{
+		//breaking here
 		if(nxt->free!=0)
 		{
 			((memHeader*)ptr)->next=nxt->next;
@@ -207,32 +218,26 @@ void coalesce(char* ptr)
 
 void mydeallocate(char* ptr,char* file,int line,int type)
 {
-	printf("ver=%d\n",((memHeader*)(ptr-sizeof(memHeader)))->verify   );
-	printf("in dealloc %p - %p\n", ptr, ((memHeader*)(ptr-sizeof(memHeader)))->next);
+	memHeader* real=((memHeader*)(ptr-sizeof(memHeader)));
+	printf("ver=%d\n",real->verify   );
+	printf("in dealloc %p - %p\n", real, real->next);
 	
-	if (type==0)
+	if (type!=0)
 	{
 		//non-system request for free
-		//make sure they are askng to free a valid ptr
-		printf("non-sys free call\n");	
-		if(((memHeader*)(ptr-sizeof(memHeader)))->verify!=VER)
+		if(real->verify!=VER)
 		{
 			printf("ERROR: Not pointing to void addr\n");
 			return;
 		}
-		if(((memHeader*)(ptr-sizeof(memHeader)))->id!=id)//change id to curr->tid
+		if(real->id!=id)//will be changed to look at memBook
 		{
-			printf("%d=%d 1\n",((memHeader*)ptr)->id,type);
+	//		printf("%d=%d 1\n",((memHeader*)ptr)->id,type);
 			printf("ERROR: You do not own this memory\n");
 			return;
 		}
-		((memHeader*)(ptr-sizeof(memHeader)))->free=1;
-		((memHeader*)(ptr-sizeof(memHeader)))->id = 0;
-		printf("clearing mem\n");
-		bzero(ptr, ((((memHeader*)(ptr-sizeof(memHeader)))->next) - ptr)),
-		printf("mem clear\n");  
-		//is this all that needs to be changed on a free call? 
-		//just to mark the mem pointer as free??
+		real->free=1;
+		//bzero(ptr, ((((memHeader*)(ptr-sizeof(memHeader)))->next) - ptr)),
 		coalesce(ptr-sizeof(memHeader));
 	}
 	else
@@ -248,13 +253,10 @@ int main()
 	short* t=(short*)myallocate(sizeof(short),__FILE__,__LINE__,6);
 	//printf("size of short: %d, size of mem: %d\n", sizeof(short), (0xaa-0xa8));
 	printf("mem: %p-%p\n",mem,mem+MEM_SIZE);
-	printf("=\n");
+	printf("Given ptr=%p\n",t);
 	short* temp=t;
 	short x=888;
 	t=&x;
-	printf("Here it is at %p: %d\n", temp, *t);
 	t=temp;
-	free((char*)t);
-	printf("Is it still here?\n"); 
-	printf("%d\n", *t);//should segfault here, no longer have access to this
+	mydeallocate((char*)t,__FILE__,__LINE__,6);
 }

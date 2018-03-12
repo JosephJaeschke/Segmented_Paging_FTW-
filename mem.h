@@ -1,7 +1,6 @@
 typedef struct memHeader_
 {
-	int tid;
-	int pageNum;
+	short segNum;
 	short verify;
 	char* next;
 	char* prev;
@@ -9,9 +8,9 @@ typedef struct memHeader_
 	int id;
 } memHeader;
 
-typedef struct memBlock_
+typedef struct memBook_
 {
 	int tid;
 	int pageNum;
 	int free:1;
-} memBlock;
+} memBook;
