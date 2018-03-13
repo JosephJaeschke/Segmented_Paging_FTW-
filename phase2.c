@@ -182,11 +182,12 @@ void coalesce(char* ptr)
 		printf("-b and %p!=%p\n",nxt,pgEnd);
 		if(nxt->free!=0)
 		{
+			//recuses infinently here on the deallocate of a from man
 			printf("f\n");
 			((memHeader*)ptr)->next=nxt->next;
 			coalesce(ptr);
 		}
-		return; //or inside else?
+		return;
 			
 	}
 	else if(prv!=NULL&&(char*)nxt==pgEnd)//on right boundary of page
@@ -198,7 +199,7 @@ void coalesce(char* ptr)
 			ptr=(char*)prv;
 			coalesce(ptr);
 		}
-		return; //or inside else
+		return; 
 	}
 	else if(prv!=NULL&&(char*)nxt!=pgEnd)//somewhere in the page
 	{
