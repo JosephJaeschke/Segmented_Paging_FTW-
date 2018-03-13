@@ -4,7 +4,7 @@ typedef struct memHeader_
 	short verify;
 	char* next;
 	char* prev;
-	int free:1;
+	short free:1;
 	int id;
 } memHeader;
 
@@ -12,5 +12,5 @@ typedef struct memBook_
 {
 	int tid;
 	int pageNum;
-	int free:1;
+	int used:1;
 } memBook;
