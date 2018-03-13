@@ -99,35 +99,30 @@ char* myallocate(size_t size,char* file,int line,int type)
 				memHeader* curr=(memHeader*)ptr;
 				while((char*)curr<mem+(i+1)*sysconf(_SC_PAGE_SIZE))
 				{
-					//printf("%p<%p\n",curr,mem+(i+1)*sysconf(_SC_PAGE_SIZE));
-					//curr=(memHeader*)ptr;
 					if(curr->free!=0)
 					{
-						printf("*\n");
 						int sz=((char*)curr->next)-((char*)curr);//big enough for req size+header
 						if(abs(best-size)>abs(sz-size)&&(sz-size)>=0)
 						{
 							best=sz;
 							bestFit=curr;
-							printf("bf: %p\n",bestFit);
 						}
 					}
 					curr=(memHeader*)curr->next;
 				}
-				printf("end\n");
 				if(bestFit==NULL)
 				{
 					return NULL;
 				}
 				memHeader rest;
-				bestFit->free=0;
-				char* tempNext=bestFit->next;
-				bestFit->next=(char*)bestFit+size;
 				rest.free=1;
 				rest.prev=(char*)bestFit;
-				rest.next=tempNext;
+				rest.next=bestFit->next;
+				printf("rest.next=%p\n",rest.next);
 				rest.verify=VER;
 				rest.id=bestFit->id;
+				bestFit->free=0;
+				bestFit->next=(char*)bestFit+size;
 				memcpy((void*)(((char*)bestFit)+size),(void*)&rest,sizeof(memHeader));
 				return (char*)(((char*)bestFit)+sizeof(memHeader));
 			}
@@ -150,7 +145,7 @@ char* myallocate(size_t size,char* file,int line,int type)
 				rest.next=ptr+sysconf(_SC_PAGE_SIZE);
 				rest.verify=VER;
 				rest.id=type;//CHANGE FOR THREAD ID
-				printf("new=%p new.next=%p rest.prev=%p rest=%p rest.next=%p\n",ptr,ptr+size,ptr,ptr+size,ptr+sysconf(_SC_PAGE_SIZE));
+			//	printf("new=%p new.next=%p rest.prev=%p rest=%p rest.next=%p\n",ptr,ptr+size,ptr,ptr+size,ptr+sysconf(_SC_PAGE_SIZE));
 				memcpy((void*)(ptr+size),(void*)&rest,sizeof(memHeader));
 				return ptr+sizeof(memHeader);
 			}
@@ -170,51 +165,62 @@ char* myallocate(size_t size,char* file,int line,int type)
 
 void coalesce(char* ptr)
 {
-	printf("-c\n");
+	printf("-c(%p)\n",ptr);
+	int segIndex=(ptr-mem)/sysconf(_SC_PAGE_SIZE);
+	char* pgStart=mem+segIndex*sysconf(_SC_PAGE_SIZE);
+	char* pgEnd=mem+(segIndex+1)*sysconf(_SC_PAGE_SIZE);
 	memHeader* nxt=(memHeader*)((memHeader*)ptr)->next;
 	memHeader* prv=(memHeader*)((memHeader*)ptr)->prev;
-	if(prv==NULL&&(char*)nxt==mem+MEM_SIZE)
+	if(prv==NULL&&(char*)nxt==pgEnd)
 	{
+		//empty page
+		printf("-a\n");
 		return;
 	}
-	else if(prv!=NULL&&(char*)nxt!=mem+MEM_SIZE)
+	else if(prv==NULL&&(char*)nxt!=pgEnd)//on left boundary of page
 	{
-		if(prv->free==0&&nxt->free==0)
-		{
-			return;
-		}
+		printf("-b and %p!=%p\n",nxt,pgEnd);
 		if(nxt->free!=0)
 		{
+			printf("f\n");
 			((memHeader*)ptr)->next=nxt->next;
+			coalesce(ptr);
 		}
-		if(prv->free!=0)
-		{
-			prv->next=((memHeader*)ptr)->next;
-			nxt->prev=((memHeader*)ptr)->prev;	
-			ptr=(char*)prv;
-		}
-		coalesce(ptr);
+		return; //or inside else?
+			
 	}
-	else if((char*)nxt==mem+MEM_SIZE)
+	else if(prv!=NULL&&(char*)nxt==pgEnd)//on right boundary of page
 	{
+		printf("-c\n");
 		if(prv->free!=0)
 		{
 			prv->next=((memHeader*)ptr)->next;
-			nxt->prev=((memHeader*)ptr)->prev;	
 			ptr=(char*)prv;
 			coalesce(ptr);
 		}
+		return; //or inside else
 	}
-	else if(prv==NULL)
+	else if(prv!=NULL&&(char*)nxt!=pgEnd)//somewhere in the page
 	{
-		//breaking here
-		if(nxt->free!=0)
+		printf("-d\n");
+		if(nxt->free!=0||prv->free!=0)
 		{
-			((memHeader*)ptr)->next=nxt->next;
-			coalesce(ptr);	
+			if(nxt->free!=0)
+			{
+				printf("d1\n");
+				((memHeader*)ptr)->next=nxt->next;
+			}
+			if(prv->free!=0)
+			{
+				printf("d2\n");
+				prv->next=((memHeader*)ptr)->next;
+				nxt->prev=((memHeader*)ptr)->prev;	
+				ptr=(char*)prv;
+			}
+			coalesce(ptr);
 		}
+		return;
 	}
-	
 }
 
 void mydeallocate(char* ptr,char* file,int line,int type)
@@ -222,7 +228,7 @@ void mydeallocate(char* ptr,char* file,int line,int type)
 	memHeader* real=((memHeader*)(ptr-sizeof(memHeader)));
 	printf("ver=%d\n",real->verify   );
 	printf("in dealloc %p - %p\n", real, real->next);
-	printf(">%lu\n",((char*)real-mem)/sysconf(_SC_PAGE_SIZE));
+	//printf(">%lu\n",((char*)real-mem)/sysconf(_SC_PAGE_SIZE));
 	if (type!=0)
 	{
 		//non-system request for free
@@ -244,8 +250,8 @@ void mydeallocate(char* ptr,char* file,int line,int type)
 	else
 	{
 		//sys wants to free mem
-		//don't know if sys is allowed to free usr mem or not??
 	}
+	ptr=NULL;
 	return;
 }
 
@@ -272,5 +278,7 @@ int main()
 	t=&x;
 	t=temp;
 	*/
-	//mydeallocate((char*)t,__FILE__,__LINE__,6);
+	mydeallocate((char*)t,__FILE__,__LINE__,6);
+	mydeallocate((char*)a,__FILE__,__LINE__,6);
+	//mydeallocate((char*)a,__FILE__,__LINE__,6);
 }
