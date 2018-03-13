@@ -84,7 +84,7 @@ char* myallocate(size_t size,char* file,int line,int type)
 		//printf("start searching @ ptr=%p\n",ptr);
 		//printf("end @ ptr=%p\n",mem+MEM_SIZE);
 		int i;
-		for(i=BOOK_STRT-1;i<1953;i++)
+		for(i=BOOK_STRT;i<1953;i++)
 		{
 			printf("-");
 			//printf("id:%d\n",data.free);
@@ -97,20 +97,24 @@ char* myallocate(size_t size,char* file,int line,int type)
 				char* temp=ptr;
 				memHeader* bestFit=NULL;
 				memHeader* curr=(memHeader*)ptr;
-				while((char*)curr!=temp+sysconf(_SC_PAGE_SIZE))
+				while((char*)curr<mem+(i+1)*sysconf(_SC_PAGE_SIZE))
 				{
-					curr=(memHeader*)ptr;
+					//printf("%p<%p\n",curr,mem+(i+1)*sysconf(_SC_PAGE_SIZE));
+					//curr=(memHeader*)ptr;
 					if(curr->free!=0)
 					{
+						printf("*\n");
 						int sz=((char*)curr->next)-((char*)curr);//big enough for req size+header
 						if(abs(best-size)>abs(sz-size)&&(sz-size)>=0)
 						{
 							best=sz;
 							bestFit=curr;
+							printf("bf: %p\n",bestFit);
 						}
 					}
 					curr=(memHeader*)curr->next;
 				}
+				printf("end\n");
 				if(bestFit==NULL)
 				{
 					return NULL;
@@ -124,15 +128,15 @@ char* myallocate(size_t size,char* file,int line,int type)
 				rest.next=tempNext;
 				rest.verify=VER;
 				rest.id=bestFit->id;
-				memcpy((void*)(((void*)bestFit)+size),(void*)&rest,sizeof(memHeader));
-				return (char*)(((void*)bestFit)+sizeof(memHeader));
+				memcpy((void*)(((char*)bestFit)+size),(void*)&rest,sizeof(memHeader));
+				return (char*)(((char*)bestFit)+sizeof(memHeader));
 			}
 			else if(segments[i].used==0)
 			{
+				//found free page!!
 				printf("2\n");
 				segments[i].used=1;
 				segments[i].tid=id;//change to proper tid
-				//found free page!!
 				memHeader new;
 				new.free=0;
 				new.prev=NULL;
@@ -146,13 +150,9 @@ char* myallocate(size_t size,char* file,int line,int type)
 				rest.next=ptr+sysconf(_SC_PAGE_SIZE);
 				rest.verify=VER;
 				rest.id=type;//CHANGE FOR THREAD ID
+				printf("new=%p new.next=%p rest.prev=%p rest=%p rest.next=%p\n",ptr,ptr+size,ptr,ptr+size,ptr+sysconf(_SC_PAGE_SIZE));
 				memcpy((void*)(ptr+size),(void*)&rest,sizeof(memHeader));
 				return ptr+sizeof(memHeader);
-			}
-			else
-			{
-		//		printf("-");
-				ptr+=sysconf(_SC_PAGE_SIZE);
 			}
 		}
 		//printf("3\n");
@@ -254,10 +254,18 @@ int main()
 	short* t=(short*)myallocate(sizeof(short),__FILE__,__LINE__,6);
 	//printf("size of short: %d, size of mem: %d\n", sizeof(short), (0xaa-0xa8));
 	printf("mem: %p...|%p-%p\n",mem,mem+MEM_STRT,mem+MEM_SIZE);
+	printf("+%p\n",((memHeader*)((memHeader*)((char*)t-sizeof(memHeader)))->next)->next);
 	printf("Given ptr=%p\n",t);
+	short* u=(short*)myallocate(sizeof(short),__FILE__,__LINE__,6);
+	printf("Given ptr=%p\n",u);
+//	short* v=(short*)myallocate(sizeof(short),__FILE__,__LINE__,6);
+//	printf("Given ptr=%p\n",t);
+
+	/*
 	short* temp=t;
 	short x=888;
 	t=&x;
 	t=temp;
-	mydeallocate((char*)t,__FILE__,__LINE__,6);
+	*/
+	//mydeallocate((char*)t,__FILE__,__LINE__,6);
 }
