@@ -222,7 +222,7 @@ void mydeallocate(char* ptr,char* file,int line,int type)
 	memHeader* real=((memHeader*)(ptr-sizeof(memHeader)));
 	printf("ver=%d\n",real->verify   );
 	printf("in dealloc %p - %p\n", real, real->next);
-	
+	printf(">%lu\n",((char*)real-mem)/sysconf(_SC_PAGE_SIZE));
 	if (type!=0)
 	{
 		//non-system request for free
@@ -231,7 +231,7 @@ void mydeallocate(char* ptr,char* file,int line,int type)
 			printf("ERROR: Not pointing to void addr\n");
 			return;
 		}
-		if(real->id!=id)//will be changed to look at memBook
+		if(segments[((char*)real-mem)/sysconf(_SC_PAGE_SIZE)].tid!=id)//will be changed to look at memBook
 		{
 	//		printf("%d=%d 1\n",((memHeader*)ptr)->id,type);
 			printf("ERROR: You do not own this memory\n");
@@ -258,6 +258,11 @@ int main()
 	printf("Given ptr=%p\n",t);
 	short* u=(short*)myallocate(sizeof(short),__FILE__,__LINE__,6);
 	printf("Given ptr=%p\n",u);
+	short* v=(short*)myallocate(sizeof(short),__FILE__,__LINE__,6);
+	printf("Given ptr=%p\n",v);
+	mydeallocate((char*)u,__FILE__,__LINE__,6);
+	short* a=(short*)myallocate(sizeof(short),__FILE__,__LINE__,6);
+	printf("Given ptr=%p\n",a);
 //	short* v=(short*)myallocate(sizeof(short),__FILE__,__LINE__,6);
 //	printf("Given ptr=%p\n",t);
 
