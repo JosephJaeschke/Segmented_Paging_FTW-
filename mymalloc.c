@@ -114,6 +114,7 @@ char* myallocate(size_t size,char* file,int line,int type)
 					rest.prev=(char*)bestFit;
 					rest.next=bestFit->next;
 					rest.verify=VER;
+					rest.next_page = NULL;
 					bestFit->next=(char*)bestFit+size;
 					memcpy((void*)(((char*)bestFit)+size),(void*)&rest,sizeof(memHeader));
 				}
@@ -131,12 +132,14 @@ char* myallocate(size_t size,char* file,int line,int type)
 				new.next=ptr+(signed)size;
 				new.verify=VER;
 				new.id=id;//CHANGE FOR THREAD ID
+				new.next_page = NULL;
 				memcpy((void*)ptr,(void*)&new,sizeof(memHeader));
 				memHeader rest;
 				rest.free=1;
 				rest.prev=ptr;
 				rest.next=ptr+sysconf(_SC_PAGE_SIZE);
 				rest.verify=VER;
+				rest.next_page = NULL;
 				rest.id=type;//CHANGE FOR THREAD ID
 			//	printf("new=%p new.next=%p rest.prev=%p rest=%p rest.next=%p\n",ptr,ptr+size,ptr,ptr+size,ptr+sysconf(_SC_PAGE_SIZE));
 				memcpy((void*)(ptr+(signed)size),(void*)&rest,sizeof(memHeader));

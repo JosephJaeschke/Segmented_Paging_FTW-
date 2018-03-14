@@ -6,6 +6,7 @@ typedef struct memHeader_
 	char* prev;
 	short free:1;
 	int id;
+	struct memHeader_* next_page;
 } memHeader;
 
 typedef struct memBook_
