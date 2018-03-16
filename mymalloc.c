@@ -385,4 +385,5 @@ int main()
 	printf("==\n");
 	mydeallocate((char*)v,__FILE__,__LINE__,6);
 	//mydeallocate((char*)a,__FILE__,__LINE__,6);
+	return 0;
 }
