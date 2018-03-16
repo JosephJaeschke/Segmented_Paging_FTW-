@@ -1,9 +1,10 @@
 #ifndef _MEM_H_
 #define _MEM_H_
 
+
 typedef struct memHeader_
 {
-	short segNum; //ASSUMPTION: all memHeaders that start at a page have a valid segNum
+	short segNum; //ASSUMPTION: all memHeaders that start at a page have a valid segNum. in fact, ALL memHeaders will have their segNum
 	short verify;
 	char* next;
 	char* prev;
@@ -28,7 +29,7 @@ typedef struct memBook_
 
 
 /* adds threads name and segment number to a list of threads using dynamic alloation*/
-void add_thread(short segNum)
+void add_thread(short segNum);
 
 /* deletes thread entry from threads using malloc, replaces tid with -2 (meaning used but empty)*/
 void remove_thread();

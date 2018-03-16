@@ -83,25 +83,21 @@ char* myallocate(size_t size,char* file,int line,int type)
 		//TODO: handle requests for memory larger than a single page 
 		
 		//check if it's in the list
-		for (; i < 1953 || threadList[i]  == id; i++);
-		
-		seg_pos = (threadList[i] == id) ? threadList[i][1] : -1;
+		for (; i < 1953 || threadList[i][0]  == id; i++);
+		seg_pos = (threadList[i][0] == id) ? threadList[i][1] : -1;
 
 		for(i=BOOK_STRT;i<1953;i++)
 		{
 			printf("-");
 			//printf("id:%d\n",data.free);
-
-			//if our thread is already given a page in memory, this should take us directly to it
-			i = (seg_pos != -1) ? seg_pos : i;
-
-			char* ptr=mem+i*sysconf(_SC_PAGE_SIZE);
-
+			//i = (seg_pos != -1) ? seg_pos : i;
+			//char* ptr=mem+i*sysconf(_SC_PAGE_SIZE);
+			char* ptr = (seg_pos == -1) ? mem + i*sysconf(_SC_PAGE_SIZE) : mem + seg_pos*sysconf(_SC_PAGE_SIZE);
 			
 			if(seg_pos != -1)
 			{
 				//if(segments[i].tid==id)
-				if ( ((memPointer*)ptr)->page_info->first_in_chain) 
+				if ( ((memHeader*)ptr)->page_info.first_in_chain) 
 				{
 					//found its page!!
 					printf("-1\n");
@@ -109,16 +105,15 @@ char* myallocate(size_t size,char* file,int line,int type)
 					char* temp=ptr;
 					int sz;
 					memHeader* 		current_page;
-					memHeader* 		temp_page;
 					
-					current_page = possible_page((memHeader*) ptr);
+					current_page = possible_page((memHeader*) ptr, size);
 
 					//at null and need a new page.  start from beginning
 					if(current_page == NULL)
 					{
 						extra_page = (memHeader*)ptr;
 						i = BOOK_STRT;
-						seg_pos = -1
+						seg_pos = -1;
 						continue;	
 					}
 	
@@ -166,13 +161,14 @@ char* myallocate(size_t size,char* file,int line,int type)
 						rest.free=1;
 						rest.prev=(char*)bestFit;
 						rest.next=bestFit->next;
+						rest.segNum = seg_pos;
 						rest.verify=VER;
-						rest.next_page = NULL;
+						rest.page_info.next_page = NULL;
 						bestFit->next=(char*)bestFit+size;
 						memcpy((void*)(((char*)bestFit)+size),(void*)&rest,sizeof(memHeader));
 					}
 
-					current_page->mem_left -= size;
+					segments[seg_pos].mem_left -= size;
 					return (char*)(((char*)bestFit)+sizeof(memHeader));
 				}
 			}
@@ -199,7 +195,7 @@ char* myallocate(size_t size,char* file,int line,int type)
 
 					if (extra_page != NULL)
 					{
-						extra_page->next_page = (memHeader*)ptr;
+						extra_page->page_info.next_page = (memHeader*)ptr;
 						new.page_info.first_in_chain = 0;
 					}
 					else
@@ -214,7 +210,7 @@ char* myallocate(size_t size,char* file,int line,int type)
 					rest.prev=ptr;
 					rest.next=ptr+sysconf(_SC_PAGE_SIZE);
 					rest.verify=VER;
-					rest.next_page = NULL;
+					rest.page_info.next_page = NULL;
 					rest.page_info.has_info = 0;
 					rest.id=type;//CHANGE FOR THREAD ID
 				//	printf("new=%p new.next=%p rest.prev=%p rest=%p rest.next=%p\n",ptr,ptr+size,ptr,ptr+size,ptr+sysconf(_SC_PAGE_SIZE));
@@ -240,12 +236,12 @@ char* myallocate(size_t size,char* file,int line,int type)
 void add_thread(short segNum)
 {
 	int		i;
-	for (i = 0; i < 1953 && !( (threadList[i] == -1)  || (threadList[i] == -2) ); i++);
+	for (i = 0; i < 1953 && !( (threadList[i][0] == -1)  || (threadList[i][0] == -2) ); i++);
 	
 	//case: no spot found
 	if (i == 1953) return;
 	
-	threadList[i] = id;
+	threadList[i][0] = id;
 	threadList[i][1] = segNum;
 	return; 
 }
@@ -253,7 +249,7 @@ void add_thread(short segNum)
 void remove_thread()
 {
 	int 		i;
-	for (i = 0; i < 1953 && threadList[i] == id; i++);
+	for (i = 0; i < 1953 && threadList[i][0] == id; i++);
 	
 	//case: thread not found
 	if (i == 1953) 
@@ -262,15 +258,15 @@ void remove_thread()
 		return;
 	}
 	
-	threadList[i] = -2;
+	threadList[i][0] = -2;
 	return;
 }
 
 memHeader* possible_page(memHeader* start, size_t target)
 {
-	if (start->page_info->has_info) //extra check that we are at the start of the page
+	if (start->page_info.has_info) //extra check that we are at the start of the page
 	{	
-		while ( (segments[start->segNum].mem_left < target) && (start != NULL) ) start = start->next_page;
+		while ( (segments[start->segNum].mem_left < target) && (start != NULL) ) start = start->page_info.next_page;
 	}
 	return start;
 }
