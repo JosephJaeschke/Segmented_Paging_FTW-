@@ -16,6 +16,7 @@
 #define pthread_join my_pthread_join
 #define pthread_exit my_pthread_exit
 #define pthread_yield my_pthread_yield
+#define pthread_mutex_t my_pthread_mutex_t
 #define pthread_mutex_init my_pthread_mutex_init
 #define pthread_mutex_lock my_pthread_mutex_lock
 #define pthread_mutex_unlock my_pthread_mutex_unlock
