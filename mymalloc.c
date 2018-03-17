@@ -181,8 +181,6 @@ char* myallocate(size_t size,char* file,int line,int type)
 			
 			if(segments[i].tid==id)
 			{
-				if (segments[i].first_in_chain) 
-				{
 					//found its page!!
 					printf("-1\n");
 					int best=sysconf(_SC_PAGE_SIZE);
@@ -262,7 +260,6 @@ char* myallocate(size_t size,char* file,int line,int type)
 
 					segments[i].mem_left -= size;
 					return (char*)(((char*)bestFit)+sizeof(memHeader));
-				}
 			}
 		}
 		for(i=BOOK_STRT;i<1953;i++)
