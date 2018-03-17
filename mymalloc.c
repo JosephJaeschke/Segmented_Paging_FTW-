@@ -19,7 +19,7 @@ char* mem;
 int meminit=0;
 struct sigaction sa;
 int id=1; //equivalent to curr->tid
-memBook segments[1953]={0};
+memBook segments[1953]={0};//change 1953 to sysconf dervived value
 //keeps track of which threads are in and which are not along with which segment they are present in.  -1: spot has not been used, -2: vacant but used
 int threadList[1953][2] = { {-1} };
 
@@ -58,7 +58,7 @@ char* myallocate(size_t size,char* file,int line,int type)
 	{
 		mem=(char*)memalign(sysconf(_SC_PAGE_SIZE),MEM_SIZE);
 		memset(mem,0,MEM_SIZE);
-		printf("-0, %lu\n",sizeof(memHeader));	
+		printf("header size:%lu,0x%X\n",sizeof(memHeader),(int)sizeof(memHeader));	
 		sa.sa_flags=SA_SIGINFO;
 		sigemptyset(&sa.sa_mask);
 		sa.sa_sigaction=handler;
@@ -67,9 +67,70 @@ char* myallocate(size_t size,char* file,int line,int type)
 			printf("Fatel error in signal handler setup\n");
 			exit(EXIT_FAILURE);
 		}
+		int i;
+		for(i=0;i<1953;i++)
+		{
+			segments[i].mem_left=sysconf(_SC_PAGE_SIZE);
+		}
 		meminit=1;
 	}
-
+	if(size>sysconf(_SC_PAGE_SIZE))
+	{
+		double  number=size/sysconf(_SC_PAGE_SIZE);
+		int tempSize=(signed)size;
+		if(number-(int)number!=0)
+		{
+			number++;
+		}
+		int pgReq=(int)number;
+		int i;
+		int pgCount=0;
+		for(i=0;i<1953;i++)
+		{
+			if(segments[i].used==0)//change to curr->tid
+			{
+				pgCount++;
+			}
+			else
+			{
+				pgCount=0;
+			}
+			if(pgCount==pgReq)
+			{
+				break;
+			}
+		}
+		if(i==1953)
+		{
+			//could not find enough space
+			return NULL;
+		}
+		i=i-pgCount; //find first page
+		int j,memUsed=0;
+		for(j=0;j<pgReq;j++)
+		{
+			segments[j].tid=id;//change to curr->id
+			segments[j].used=1;
+			if(tempSize>sysconf(_SC_PAGE_SIZE))
+			{
+				memUsed=sysconf(_SC_PAGE_SIZE);
+				tempSize=tempSize-sysconf(_SC_PAGE_SIZE);
+			}
+			else
+			{
+				memUsed=tempSize;
+				tempSize=tempSize-tempSize;
+			}
+			segments[j].mem_left=memUsed;
+		}
+		memHeader new;
+		new.id=id;//change to curr->id
+		new.verify=VER;
+		new.prev=NULL;
+		new.next=mem+(i+pgCount)*sysconf(_SC_PAGE_SIZE)+(size%sysconf(_SC_PAGE_SIZE));
+		new.free=0;
+		new.segNum=i;
+	}
 	if(type!=0)
 	{
 		//memHeader data;
@@ -79,25 +140,26 @@ char* myallocate(size_t size,char* file,int line,int type)
 		int 		i;
 		int 		seg_pos;
 		memHeader* 	extra_page 	= NULL; //used to determine whether we need an extra page
-
-		//TODO: handle requests for memory larger than a single page 
 		
+		//todo: handle requests for memory larger than a single page 
 		//check if it's in the list
+
+		/*
 		for (; i < 1953 || threadList[i][0]  == id; i++);
 		seg_pos = (threadList[i][0] == id) ? threadList[i][1] : -1;
-
+		printf("seg_pos:%d\n",seg_pos);
+		*/
 		for(i=BOOK_STRT;i<1953;i++)
 		{
-			printf("-");
+			//printf("-");
 			//printf("id:%d\n",data.free);
 			//i = (seg_pos != -1) ? seg_pos : i;
-			//char* ptr=mem+i*sysconf(_SC_PAGE_SIZE);
-			char* ptr = (seg_pos == -1) ? mem + i*sysconf(_SC_PAGE_SIZE) : mem + seg_pos*sysconf(_SC_PAGE_SIZE);
+			char* ptr=mem+i*sysconf(_SC_PAGE_SIZE);
+			//char* ptr = (seg_pos == -1) ? mem + i*sysconf(_SC_PAGE_SIZE) : mem + seg_pos*sysconf(_SC_PAGE_SIZE);
 			
-			if(seg_pos != -1)
+			if(segments[i].tid==id)
 			{
-				//if(segments[i].tid==id)
-				if ( ((memHeader*)ptr)->page_info.first_in_chain) 
+				if (((memHeader*)ptr)->page_info.first_in_chain) 
 				{
 					//found its page!!
 					printf("-1\n");
@@ -113,14 +175,14 @@ char* myallocate(size_t size,char* file,int line,int type)
 					{
 						extra_page = (memHeader*)ptr;
 						i = BOOK_STRT;
-						seg_pos = -1;
+						//seg_pos = -1;
 						continue;	
 					}
 	
 					else if (current_page->segNum != ((memHeader*)ptr)->segNum)
 					{
 						//advance to next page via seg_pos
-						seg_pos = current_page->segNum;
+						//seg_pos = current_page->segNum;
 						continue;
 					}
 					memHeader* bestFit=NULL;
@@ -146,65 +208,72 @@ char* myallocate(size_t size,char* file,int line,int type)
 					printf("-->%d\n",best);
 					if(bestFit==NULL)
 					{
+						//added break to go to next for loop looking for empty pages
+
 						//printf("null\n");
 						//return NULL;
-						extra_page = (memHeader*) ptr;
-						i = BOOK_STRT;
-						seg_pos = -1;
-						continue;
+						//extra_page = (memHeader*) ptr;
+						//i = BOOK_STRT;
+						//seg_pos = -1;
+						//continue;
+						break;
 					}
 				
 					bestFit->free=0;
 					if((best-(signed)size)>(sizeof(memHeader)))
 					{
 						memHeader rest;
+						rest.id=id; //change for curr->tid
 						rest.free=1;
 						rest.prev=(char*)bestFit;
 						rest.next=bestFit->next;
-						rest.segNum = seg_pos;
+						rest.segNum = i;
 						rest.verify=VER;
 						rest.page_info.next_page = NULL;
 						bestFit->next=(char*)bestFit+size;
 						memcpy((void*)(((char*)bestFit)+size),(void*)&rest,sizeof(memHeader));
 					}
 
-					segments[seg_pos].mem_left -= size;
+					segments[i].mem_left -= size;
 					return (char*)(((char*)bestFit)+sizeof(memHeader));
 				}
 			}
-
-			else
+		}
+		for(i=BOOK_STRT;i<1953;i++)
+		{
+			char* ptr=mem+i*sysconf(_SC_PAGE_SIZE);
+			if(segments[i].used==0)
 			{
-				if(segments[i].used==0)
+				//found free page!!
+				printf("2\n");
+				segments[i].used=1;
+				segments[i].tid=id;//change to proper tid
+				segments[i].mem_left -= size;
+				memHeader new;
+				new.free=0;
+				new.prev=NULL;
+				new.next=ptr+(signed)size;
+				new.verify=VER;
+				new.id=id;//CHANGE FOR THREAD ID
+				new.segNum = i; //important that all memheaders that start at pages have a valid segnum
+				new.page_info.has_info = 1;
+				new.page_info.id = id; //CHANGE FOR THREAD ID
+				new.page_info.next_page = NULL;
+
+				if (extra_page!=NULL)
 				{
-					//found free page!!
-					printf("2\n");
-					segments[i].used=1;
-					segments[i].tid=id;//change to proper tid
-					segments[i].mem_left = sysconf(_SC_PAGE_SIZE) - size;
-					memHeader new;
-					new.free=0;
-					new.prev=NULL;
-					new.next=ptr+(signed)size;
-					new.verify=VER;
-					new.id=id;//CHANGE FOR THREAD ID
-					new.segNum = i; //important that all memheaders that start at pages have a valid segnum
-					new.page_info.has_info = 1;
-					new.page_info.id = id; //CHANGE FOR THREAD ID
-					new.page_info.next_page = NULL;
+					extra_page->page_info.next_page = (memHeader*)ptr;
+					new.page_info.first_in_chain = 0;
+				}
+				else
+				{
+					add_thread((short) i);
+					new.page_info.first_in_chain = 1;
+				}
 
-					if (extra_page != NULL)
-					{
-						extra_page->page_info.next_page = (memHeader*)ptr;
-						new.page_info.first_in_chain = 0;
-					}
-					else
-					{
-						add_thread((short) i);
-						new.page_info.first_in_chain = 1;
-					}
-
-					memcpy((void*)ptr,(void*)&new,sizeof(memHeader));
+				memcpy((void*)ptr,(void*)&new,sizeof(memHeader));
+				if((sysconf(_SC_PAGE_SIZE)-(signed)size)>sizeof(memHeader))
+				{
 					memHeader rest;
 					rest.free=1;
 					rest.prev=ptr;
@@ -212,12 +281,13 @@ char* myallocate(size_t size,char* file,int line,int type)
 					rest.verify=VER;
 					rest.page_info.next_page = NULL;
 					rest.page_info.has_info = 0;
-					rest.id=type;//CHANGE FOR THREAD ID
-				//	printf("new=%p new.next=%p rest.prev=%p rest=%p rest.next=%p\n",ptr,ptr+size,ptr,ptr+size,ptr+sysconf(_SC_PAGE_SIZE));
+					rest.id=id;//CHANGE FOR THREAD ID
+					rest.segNum=i;
+	//printf("new=%p new.next=%p rest.prev=%p rest=%p rest.next=%p\n",ptr,ptr+size,ptr,ptr+size,ptr+sysconf(_SC_PAGE_SIZE));
 					segments[i].mem_left -= sizeof(memHeader);
 					memcpy((void*)(ptr+(signed)size),(void*)&rest,sizeof(memHeader));
-					return ptr+sizeof(memHeader);
 				}
+				return ptr+sizeof(memHeader);
 			}
 		}
 		//printf("3\n");
@@ -282,6 +352,7 @@ void coalesce(char* ptr)
 	if(prv==NULL&&(char*)nxt==pgEnd)
 	{
 		//empty page
+		//mark it as empty
 		printf("-a\n");
 		return;
 	}
@@ -366,10 +437,11 @@ void mydeallocate(char* ptr,char* file,int line,int type)
 
 int main()
 {
+
 	short* t=(short*)myallocate(sizeof(short),__FILE__,__LINE__,6);
 	//printf("size of short: %d, size of mem: %d\n", sizeof(short), (0xaa-0xa8));
 	printf("mem: %p...|%p-%p\n",mem,mem+MEM_STRT,mem+MEM_SIZE);
-	printf("+%p\n",((memHeader*)((memHeader*)((char*)t-sizeof(memHeader)))->next)->next);
+//	printf("+%p\n",((memHeader*)((memHeader*)((char*)t-sizeof(memHeader)))->next)->next);
 	printf("t Given ptr=%p\n",t);
 	short* u=(short*)myallocate(sizeof(short),__FILE__,__LINE__,6);
 	printf("u Given ptr=%p\n",u);
