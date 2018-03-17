@@ -74,73 +74,95 @@ char* myallocate(size_t size,char* file,int line,int type)
 		}
 		meminit=1;
 	}
-	if(size>sysconf(_SC_PAGE_SIZE))
-	{
-		double  number=size/sysconf(_SC_PAGE_SIZE);
-		int tempSize=(signed)size;
-		if(number-(int)number!=0)
-		{
-			number++;
-		}
-		int pgReq=(int)number;
-		int i;
-		int pgCount=0;
-		for(i=0;i<1953;i++)
-		{
-			if(segments[i].used==0)//change to curr->tid
-			{
-				pgCount++;
-			}
-			else
-			{
-				pgCount=0;
-			}
-			if(pgCount==pgReq)
-			{
-				break;
-			}
-		}
-		if(i==1953)
-		{
-			//could not find enough space
-			return NULL;
-		}
-		i=i-pgCount; //find first page
-		int j,memUsed=0;
-		for(j=0;j<pgReq;j++)
-		{
-			segments[j].tid=id;//change to curr->id
-			segments[j].used=1;
-			if(tempSize>sysconf(_SC_PAGE_SIZE))
-			{
-				memUsed=sysconf(_SC_PAGE_SIZE);
-				tempSize=tempSize-sysconf(_SC_PAGE_SIZE);
-			}
-			else
-			{
-				memUsed=tempSize;
-				tempSize=tempSize-tempSize;
-			}
-			segments[j].mem_left=memUsed;
-		}
-		memHeader new;
-		new.id=id;//change to curr->id
-		new.verify=VER;
-		new.prev=NULL;
-		new.next=mem+(i+pgCount)*sysconf(_SC_PAGE_SIZE)+(size%sysconf(_SC_PAGE_SIZE));
-		new.free=0;
-		new.segNum=i;
-	}
 	if(type!=0)
 	{
+		if(size>sysconf(_SC_PAGE_SIZE))
+		{
+			//request more memory than is in one page
+			double  number=size/sysconf(_SC_PAGE_SIZE);
+			int tempSize=(signed)size;
+			if(number-(int)number!=0)
+			{
+				number++;
+			}
+			int pgReq=(int)number;
+			int i;
+			int pgCount=0;
+			for(i=BOOK_STRT;i<1953;i++)
+			{
+				//this looks for contiguous pages
+				if(segments[i].used==0)
+				{
+					pgCount++;
+				}
+				else
+				{
+					pgCount=0;
+				}
+				if(pgCount==pgReq)
+				{
+					break;
+				}
+			}
+			if(i==1954)
+			{
+				//could not find enough space
+				return NULL;
+			}
+			i=i-pgCount+1; //find first page
+			int j,memUsed=0;
+			for(j=0;j<pgReq;j++)
+			{
+				segments[j].tid=id;//change to curr->id
+				segments[j].used=1;
+				if(tempSize>sysconf(_SC_PAGE_SIZE))
+				{
+					memUsed=sysconf(_SC_PAGE_SIZE);
+					tempSize=tempSize-sysconf(_SC_PAGE_SIZE);
+				}
+				else
+				{
+					memUsed=tempSize;//on last page
+				}
+				segments[j].mem_left=memUsed;
+			}
+			memHeader new;
+			new.id=id;//change to curr->id
+			new.verify=VER;
+			new.prev=NULL;
+			new.next=mem+(i+pgCount)*sysconf(_SC_PAGE_SIZE)+(size%sysconf(_SC_PAGE_SIZE));
+			new.free=0;
+			new.segNum=i;
+			segments[i].first_in_chain=1;
+			segments[i].next_page=mem+sysconf(_SC_PAGE_SIZE);
+			int k;
+			for(k=0;k<1;k++)
+			{
+				
+			}
+			if(segments[j-1].mem_left>sizeof(memHeader));
+			{
+				new.next=mem+(i+pgCount-1)*sysconf(_SC_PAGE_SIZE)+tempSize;
+				memHeader rest;
+				rest.id=id;//change to curr->id
+				rest.verify=VER;
+				rest.free=1;
+				rest.segNum=i+pgCount-1;
+				rest.next=mem+(i+pgCount)*sysconf(_SC_PAGE_SIZE);
+				rest.prev=mem+i*sysconf(_SC_PAGE_SIZE);
+				segments[i].first_in_chain=0;
+				memcpy(mem+(i+pgCount-1)*sysconf(_SC_PAGE_SIZE)+tempSize,&rest,sizeof(memHeader));
+			}
+			memcpy(mem+i*sysconf(_SC_PAGE_SIZE),&new,sizeof(memHeader));
+		}
+	
 		//memHeader data;
 		//char* ptr=mem+MEM_STRT;
 		//printf("start searching @ ptr=%p\n",ptr);
 		//printf("end @ ptr=%p\n",mem+MEM_SIZE);
 		int 		i;
 		int 		seg_pos;
-		memHeader* 	extra_page 	= NULL; //used to determine whether we need an extra page
-		
+		//memHeader* 	extra_page 	= NULL; //used to determine whether we need an extra page
 		//todo: handle requests for memory larger than a single page 
 		//check if it's in the list
 
@@ -159,18 +181,19 @@ char* myallocate(size_t size,char* file,int line,int type)
 			
 			if(segments[i].tid==id)
 			{
-				if (((memHeader*)ptr)->page_info.first_in_chain) 
+				if (segments[i].first_in_chain) 
 				{
 					//found its page!!
 					printf("-1\n");
-					int best=sysconf(_SC_PAGE_SIZE);//change for multiple pgs
+					int best=sysconf(_SC_PAGE_SIZE);
 					char* temp=ptr;
 					int sz;
-					memHeader* 		current_page;
+					//memHeader* 		current_page;
 					
-					current_page = possible_page((memHeader*) ptr, size);
+					//current_page = possible_page((memHeader*) ptr, size);
 
 					//at null and need a new page.  start from beginning
+					/*
 					if(current_page == NULL)
 					{
 						extra_page = (memHeader*)ptr;
@@ -185,6 +208,7 @@ char* myallocate(size_t size,char* file,int line,int type)
 						//seg_pos = current_page->segNum;
 						continue;
 					}
+					*/
 					memHeader* bestFit=NULL;
 					memHeader* curr=(memHeader*)ptr;
 					while((char*)curr<mem+(i+1)*sysconf(_SC_PAGE_SIZE))
@@ -220,6 +244,7 @@ char* myallocate(size_t size,char* file,int line,int type)
 					}
 				
 					bestFit->free=0;
+					//don't need to do rest b/c it used to be rest or a filled out block i think
 					if((best-(signed)size)>(sizeof(memHeader)))
 					{
 						memHeader rest;
@@ -229,7 +254,8 @@ char* myallocate(size_t size,char* file,int line,int type)
 						rest.next=bestFit->next;
 						rest.segNum = i;
 						rest.verify=VER;
-						rest.page_info.next_page = NULL;
+						segments[i].first_in_chain=0;
+						segments[i].next_page = NULL;
 						bestFit->next=(char*)bestFit+size;
 						memcpy((void*)(((char*)bestFit)+size),(void*)&rest,sizeof(memHeader));
 					}
@@ -252,14 +278,13 @@ char* myallocate(size_t size,char* file,int line,int type)
 				memHeader new;
 				new.free=0;
 				new.prev=NULL;
-				new.next=ptr+(signed)size;
+				new.next=mem+(i+1)*sysconf(_SC_PAGE_SIZE);//////////////////////////////////////////////////////////
 				new.verify=VER;
 				new.id=id;//CHANGE FOR THREAD ID
 				new.segNum = i; //important that all memheaders that start at pages have a valid segnum
-				new.page_info.has_info = 1;
-				new.page_info.id = id; //CHANGE FOR THREAD ID
-				new.page_info.next_page = NULL;
-
+				segments[i].first_in_chain=0;
+				segments[i].next_page = NULL;
+				/*
 				if (extra_page!=NULL)
 				{
 					extra_page->page_info.next_page = (memHeader*)ptr;
@@ -270,23 +295,24 @@ char* myallocate(size_t size,char* file,int line,int type)
 					add_thread((short) i);
 					new.page_info.first_in_chain = 1;
 				}
-
-				memcpy((void*)ptr,(void*)&new,sizeof(memHeader));
-				if((sysconf(_SC_PAGE_SIZE)-(signed)size)>sizeof(memHeader))
+				*/
+				if((segments[i].mem_left-(signed)size)>sizeof(memHeader))
 				{
+					new.next=ptr+(signed)size;
 					memHeader rest;
 					rest.free=1;
 					rest.prev=ptr;
 					rest.next=ptr+sysconf(_SC_PAGE_SIZE);
 					rest.verify=VER;
-					rest.page_info.next_page = NULL;
-					rest.page_info.has_info = 0;
 					rest.id=id;//CHANGE FOR THREAD ID
 					rest.segNum=i;
+					segments[i].first_in_chain=0;
+					segments[i].next_page=NULL;
 	//printf("new=%p new.next=%p rest.prev=%p rest=%p rest.next=%p\n",ptr,ptr+size,ptr,ptr+size,ptr+sysconf(_SC_PAGE_SIZE));
 					segments[i].mem_left -= sizeof(memHeader);
 					memcpy((void*)(ptr+(signed)size),(void*)&rest,sizeof(memHeader));
 				}
+				memcpy((void*)ptr,(void*)&new,sizeof(memHeader));
 				return ptr+sizeof(memHeader);
 			}
 		}
@@ -331,7 +357,7 @@ void remove_thread()
 	threadList[i][0] = -2;
 	return;
 }
-
+/*
 memHeader* possible_page(memHeader* start, size_t target)
 {
 	if (start->page_info.has_info) //extra check that we are at the start of the page
@@ -340,7 +366,7 @@ memHeader* possible_page(memHeader* start, size_t target)
 	}
 	return start;
 }
-
+*/
 void coalesce(char* ptr)
 {
 	printf("-coal(%p)\n",ptr);

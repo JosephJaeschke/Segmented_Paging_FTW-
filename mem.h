@@ -10,6 +10,7 @@ typedef struct memHeader_
 	char* prev;
 	short free:1;
 	int id;
+	/*
 	struct pageInfo_
 	{
 		short has_info:1; //info as to whether a memHeader holds info for the whole page, will always be set
@@ -17,6 +18,7 @@ typedef struct memHeader_
 		short first_in_chain:1; //whether this is the first page in the list of pages thread is responsible for
 		struct memHeader_* next_page; //list of pages this thread is responsible for
 	} page_info;
+	*/
 } memHeader;
 
 typedef struct memBook_
@@ -24,6 +26,8 @@ typedef struct memBook_
 	int tid;
 	int pageNum;
 	int used:1;
+	short first_in_chain:1; //whether this is the first page in the list of pages thread is responsible for
+	char* next_page; //list of pages this thread is responsible for
 	size_t mem_left; //accessed from memHeader via segments[i].mem_left. _SC_PAGE_SIZE - sizeof(memHeader) is max size of a segment whose used == 1
 } memBook;
 
