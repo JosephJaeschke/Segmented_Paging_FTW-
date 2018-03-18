@@ -19,6 +19,13 @@
 #define SHALLOC_STRT 1951
 #define SHALLOC_END 1955
 
+typedef struct tester_
+{
+	int a;
+	char b;
+
+} tester;
+
 char* mem;
 int meminit=0;
 struct sigaction sa;
@@ -31,16 +38,59 @@ memBook segments[1955]={0};//change 1953 to sysconf dervived value
 
 static void handler(int signum,siginfo_t* si,void* unused)
 {
-	//printf("Got SIGSEGV @ addr 0x%lx\n",(long)si->si_addr);
 	char* addr=(char*)si->si_addr;
+	//assuming sys is not protected (since always loaded and will slow sched if protected)
 	if(addr>=mem&&addr<=mem+MEM_SIZE)//is end boundary inclusive?
 	{
-//		int loc=addr/sysconf(_SC_PAGE_SIZE);	
+		printf("(sh) my bad...\n");
+		fflush(stdout);
+		int loc=(addr-mem)/sysconf(_SC_PAGE_SIZE);//page number of fault	
+		int find=loc-BOOK_STRT;//which of its pages thread wanted
+		if(segments[loc].tid==id&&segments[loc].pageNum==find)//page is already there
+		{
+			if(mprotect(mem+loc*sysconf(_SC_PAGE_SIZE),sysconf(_SC_PAGE_SIZE),PROT_READ|PROT_WRITE)==-1)
+			{
+				printf("ERROR: Memory protection failure\n");
+				exit(1);
+			}
+			return;
+		}
+		//printf("(sh) %d!=%d and %d!=%d\n",segments[loc].tid,id,segments[loc].pageNum,find);
+		int i;
+		if(mprotect(mem,MEM_SIZE,PROT_READ|PROT_WRITE)==-1)
+		{
+			printf("ERROR: Memory protection failure\n");
+			exit(1);
+		}
+		for(i=BOOK_STRT;i<BOOK_END;i++)
+		{
+			if(segments[i].tid==id&&segments[i].pageNum==find)
+			{
+				//printf("(sh) found it b/c id=%d\n",segments[i].tid);
+				//move whats in i to loc
+				memBook temp=segments[i];
+				char dataTemp[sysconf(_SC_PAGE_SIZE)];
+				memcpy(dataTemp,mem+i*sysconf(_SC_PAGE_SIZE),sysconf(_SC_PAGE_SIZE));
+				segments[i]=segments[loc];
+				memcpy(mem+i*sysconf(_SC_PAGE_SIZE),mem+loc*sysconf(_SC_PAGE_SIZE),sysconf(_SC_PAGE_SIZE));
+				segments[loc]=temp;
+				memcpy(mem+loc*sysconf(_SC_PAGE_SIZE),dataTemp,sysconf(_SC_PAGE_SIZE));
+				if(mprotect(mem,MEM_SIZE,PROT_NONE)==-1)
+				{
+					printf("ERROR: Memory protection failure\n");
+					exit(1);
+				}
+				return;
+			}
+		}
+		//couldn't find page, handle as seg fault?
+		printf("(sh) Segmentation fault (Core Dumped)\n");
+		exit(EXIT_FAILURE);
 	}
 	else
 	{
 		//real segfault
-		printf("Segmentation Fault (core dumped)\n");
+		printf("(sh) Segmentation Fault (core dumped)\n");
 		exit(EXIT_FAILURE); //didn't specify what to do
 	}
 	return;
@@ -80,12 +130,17 @@ char* myallocate(size_t size,char* file,int line,int type)
 		}
 		meminit=1;
 	}
+	if(mprotect(mem,MEM_SIZE,PROT_READ|PROT_WRITE)==-1)
+	{
+		printf("ERROR: Memory protection failure\n");
+		exit(EXIT_FAILURE);
+	}
 	if(type!=0)
 	{
 		int a,has=0;
 		for(a=BOOK_STRT;a<BOOK_END;a++)
 		{
-			if(segments[a].tid==id)
+			if(segments[a].tid==id) //change to curr->tid
 			{
 				has++;
 			}
@@ -151,6 +206,11 @@ char* myallocate(size_t size,char* file,int line,int type)
 							//int dist=a-loc;
 							//bestFit=bestFit-(*sysconf(_SC_PAGE_SIZE));
 						}
+						if(mprotect(mem,MEM_SIZE,PROT_NONE)==-1)
+						{
+							printf("ERROR: Memory protection problem\n");
+							exit(1);
+						}
 						return (char*)bestFit+sizeof(memHeader);
 					}
 
@@ -180,7 +240,7 @@ char* myallocate(size_t size,char* file,int line,int type)
 					rest.prev=mem+(has+BOOK_STRT)*sysconf(_SC_PAGE_SIZE);
 					rest.next=mem+(has+1+BOOK_STRT)*sysconf(_SC_PAGE_SIZE);
 					new.next=mem+(has+BOOK_STRT)*sysconf(_SC_PAGE_SIZE)+size;
-					printf("new.next=%p\n",new.next);
+				//	printf("new.next=%p\n",new.next);
 					rest.verify=VER;
 					rest.id=id;
 					rest.free=1;
@@ -203,9 +263,18 @@ char* myallocate(size_t size,char* file,int line,int type)
 					memcpy(mem+BOOK_STRT*sysconf(_SC_PAGE_SIZE),tempData,sysconf(_SC_PAGE_SIZE));
 
 				}
-				printf("-->%p\n",mem+BOOK_STRT*sysconf(_SC_PAGE_SIZE)+sizeof(memHeader));
+				if(mprotect(mem,MEM_SIZE,PROT_NONE)==-1)
+				{
+					printf("ERROR: Memory protection failure\n");
+					exit(1);
+				}
 				return mem+(BOOK_STRT)*sysconf(_SC_PAGE_SIZE)+sizeof(memHeader);
 			}
+		}
+		if(mprotect(mem,MEM_SIZE,PROT_NONE)==-1)
+		{
+			printf("ERROR: Memory protection failure\n");
+			exit(1);
 		}
 		return NULL;
 	}
@@ -318,14 +387,16 @@ void mydeallocate(char* ptr,char* file,int line,int type)
 int main()
 {
 
-	short* t=(short*)myallocate(sizeof(short),__FILE__,__LINE__,6);
+	tester* t=(tester*)myallocate(sizeof(tester),__FILE__,__LINE__,6);
 	//printf("size of short: %d, size of mem: %d\n", sizeof(short), (0xaa-0xa8));
 	printf("mem: %p...|%p-%p\n",mem,mem+MEM_STRT,mem+MEM_SIZE);
 //	printf("+%p\n",((memHeader*)((memHeader*)((char*)t-sizeof(memHeader)))->next)->next);
 	printf("t Given ptr=%p\n",t);
+	t->a=4;
+	printf("in t:%d\n",t->a);
+	/*
 	short* u=(short*)myallocate(sizeof(short),__FILE__,__LINE__,6);
 	printf("u Given ptr=%p\n",u);
-	/*
 	short* v=(short*)myallocate(sizeof(short),__FILE__,__LINE__,6);
 	printf("v Given ptr=%p\n",v);
 	mydeallocate((char*)u,__FILE__,__LINE__,6);
@@ -340,8 +411,23 @@ int main()
 	*/
 	printf("---------------------------------\n");
 	id=2;
-	short* o=(short*)myallocate(sizeof(short),__FILE__,__LINE__,6);
+	if(mprotect(mem,MEM_SIZE,PROT_NONE)==-1)
+	{
+		printf("ERROR: Memory could not be protected");
+		exit(EXIT_FAILURE);
+	}
+	tester* o=(tester*)myallocate(sizeof(tester),__FILE__,__LINE__,6);
 	printf("o Given ptr=%p\n",o);
+	o->a=-9;
+	printf("in o:%d\n",o->a);
+	printf("----------------------------------\n");
+	id=1;
+	if(mprotect(mem,MEM_SIZE,PROT_NONE)==-1)
+	{
+		printf("ERROR: Memory could not be protected");
+		exit(EXIT_FAILURE);
+	}
+	printf("in t again:%d\n",t->a);
 	//mydeallocate((char*)t,__FILE__,__LINE__,6);
 	return 0;
 }
