@@ -154,27 +154,37 @@ char* myallocate(size_t size,char* file,int line,int type)
 				char* ptr=mem+a*sysconf(_SC_PAGE_SIZE);
 				if(segments[a].tid==id)//change to curr->id
 				{
+					printf("-found @ pg %d\n",a);
 					//apply best-fit
 					int best=sysconf(_SC_PAGE_SIZE);
 					int sz;
-					char* temp=ptr;
+					char* was=mem+(segments[a].pageNum+BOOK_STRT)*sysconf(_SC_PAGE_SIZE);//where it should be
 					memHeader* bestFit=NULL;
 					memHeader* curr=(memHeader*)ptr;
-					while((char*)curr!=mem+(a+1)*sysconf(_SC_PAGE_SIZE))
+					printf("pgNUM=%d\n",segments[a].pageNum);
+					printf("%p!=%p\n",was,mem+(segments[a].pageNum+1+BOOK_STRT)*sysconf(_SC_PAGE_SIZE));
+					while(was!=mem+(segments[a].pageNum+1+BOOK_STRT)*sysconf(_SC_PAGE_SIZE))
 					{
+						printf("!\n");
 						if(curr->free!=0)
 						{
-							sz=((char*)curr->next)-((char*)curr);//big enough for req size+header
+							sz=((char*)curr->next)-((char*)was);//big enough for req size+header
+							printf("->%d, %d\n",sz,sz-(signed)size);
 							if((abs(best-(signed)size)>abs(sz-(signed)size))&&(sz-(signed)size)>=0)
 							{
+								printf("-update\n");
 								best=sz;
 								bestFit=curr;
 							}
 						}
+						was=curr->next;
 						curr=(memHeader*)curr->next;
 					}
+					printf("-->%d\n",best);
+					printf("bf: %p\n",bestFit);
 					if(bestFit!=NULL)//found a fit, move to appropriate spot and return a ptr
 					{
+						printf("-found a fit\n");
 						bestFit->free=0;
 						if((best-(signed)size)>sizeof(memHeader))
 						{
@@ -227,19 +237,20 @@ char* myallocate(size_t size,char* file,int line,int type)
 			{
 				segments[a].used=1;
 				segments[a].tid=id;//change to curr->id
-				segments[a].pageNum=has;//zeroth page
+				segments[a].pageNum=has;
 				memHeader new;
 				new.free=0;
 				new.prev=NULL;
-				new.next=mem+(has+1+BOOK_STRT)*sysconf(_SC_PAGE_SIZE);//point o next page as if already at spot
+				printf("new.next=%p\n",mem+(has+1+BOOK_STRT)*sysconf(_SC_PAGE_SIZE));
+				new.next=mem+(has+1+BOOK_STRT)*sysconf(_SC_PAGE_SIZE);
 				new.verify=VER;
 				new.id=id;//CHANGE FOR THREAD ID
 				if(sysconf(_SC_PAGE_SIZE)-size>sizeof(memHeader))
 				{
 					memHeader rest;
 					rest.prev=mem+(has+BOOK_STRT)*sysconf(_SC_PAGE_SIZE);
-					rest.next=mem+(has+1+BOOK_STRT)*sysconf(_SC_PAGE_SIZE);
 					new.next=mem+(has+BOOK_STRT)*sysconf(_SC_PAGE_SIZE)+size;
+					rest.next=mem+(has+1+BOOK_STRT)*sysconf(_SC_PAGE_SIZE);
 				//	printf("new.next=%p\n",new.next);
 					rest.verify=VER;
 					rest.id=id;
@@ -256,11 +267,11 @@ char* myallocate(size_t size,char* file,int line,int type)
 					char tempData[sysconf(_SC_PAGE_SIZE)];
 					memcpy(tempData,mem+a*sysconf(_SC_PAGE_SIZE),sysconf(_SC_PAGE_SIZE));
 					//move out what was in first spot
-					segments[a]=segments[BOOK_STRT];
-				memcpy(mem+a*sysconf(_SC_PAGE_SIZE),mem+BOOK_STRT*sysconf(_SC_PAGE_SIZE),sysconf(_SC_PAGE_SIZE));
+					segments[a]=segments[BOOK_STRT+has];
+			memcpy(mem+a*sysconf(_SC_PAGE_SIZE),mem+has+BOOK_STRT*sysconf(_SC_PAGE_SIZE),sysconf(_SC_PAGE_SIZE));
 					//move in clean page
-					segments[BOOK_STRT]=temp;
-					memcpy(mem+BOOK_STRT*sysconf(_SC_PAGE_SIZE),tempData,sysconf(_SC_PAGE_SIZE));
+					segments[BOOK_STRT+has]=temp;
+					memcpy(mem+(BOOK_STRT+has)*sysconf(_SC_PAGE_SIZE),tempData,sysconf(_SC_PAGE_SIZE));
 
 				}
 				if(mprotect(mem,MEM_SIZE,PROT_NONE)==-1)
@@ -390,6 +401,7 @@ int main()
 	tester* t=(tester*)myallocate(sizeof(tester),__FILE__,__LINE__,6);
 	//printf("size of short: %d, size of mem: %d\n", sizeof(short), (0xaa-0xa8));
 	printf("mem: %p...|%p-%p\n",mem,mem+MEM_STRT,mem+MEM_SIZE);
+	printf("sizeof(tester)=%lu\n",sizeof(tester));
 //	printf("+%p\n",((memHeader*)((memHeader*)((char*)t-sizeof(memHeader)))->next)->next);
 	printf("t Given ptr=%p\n",t);
 	t->a=4;
@@ -427,6 +439,9 @@ int main()
 		printf("ERROR: Memory could not be protected");
 		exit(EXIT_FAILURE);
 	}
+	tester* u=(tester*)myallocate(sizeof(tester),__FILE__,__LINE__,6);
+	printf("u Given ptr=%p\n",u);
+	u->b='g';
 	printf("in t again:%d\n",t->a);
 	//mydeallocate((char*)t,__FILE__,__LINE__,6);
 	return 0;
