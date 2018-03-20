@@ -64,6 +64,10 @@ static void handler(int signum,siginfo_t* si,void* unused)
 		}
 		for(i=BOOK_STRT;i<BOOK_END;i++)
 		{
+			if(segments[i].tid!=-1)
+			{
+				printf("found your page %d @ %d\n",segments[i].pageNum,i);
+			}
 			if(segments[i].tid==id&&segments[i].pageNum==find)
 			{
 				//printf("(sh) found it b/c id=%d\n",segments[i].tid);
@@ -84,7 +88,7 @@ static void handler(int signum,siginfo_t* si,void* unused)
 			}
 		}
 		//couldn't find page, handle as seg fault?
-		printf("(sh) Segmentation fault\n");
+		printf("(sh) Segmentation fault (couldn't find page)\n");
 		exit(EXIT_FAILURE);
 	}
 	else
@@ -194,13 +198,16 @@ char* myallocate(size_t size,char* file,int line,int type)
 					has++;
 				}
 			}
+			printf("has=%d\n",has);
 			for(i=0;i<pgCount;i++)
 			{
 				//set each of the memBook entries for the new pages
 				segments[pgList[i]].used=1;
 				segments[pgList[i]].tid=id;//change to curr->id
-				segments[pgList[i]].numPages=pgCount-i; //how many pages are after it for this chunk
-				segments[pgList[i]].numPages=has+i; //where each page will belong when loaded properly
+				segments[pgList[i]].pageNum=pgCount-i; //how many pages are after it for this chunk
+				segments[pgList[i]].pageNum=has+i; //where each page will belong when loaded properly
+				printf("pgList[i]=%d\n",pgList[i]);
+				printf("pgList[i].numPages=%d\n",segments[pgList[i]].numPages);
 				if(i==0)
 				{
 					segments[pgList[i]].first_in_chain=1;
@@ -566,7 +573,6 @@ int main()
 	int i;
 	for(i=0;i<5000;i++)
 	{
-		printf("i=%d\n",i);
 		t[i]='d';
 	}
 	t[4999]='\0';
