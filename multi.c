@@ -141,7 +141,8 @@ char* myallocate(size_t size,char* file,int line,int type)
 	{
 		if(size>sysconf(_SC_PAGE_SIZE))
 		{
-			double num=size/sysconf(_SC_PAGE_SIZE);
+			double num=(double)size/sysconf(_SC_PAGE_SIZE);
+			printf("raw num=%f\n",num);
 			int tempSize=(signed)size;
 			if(num-(int)num!=0)
 			{
@@ -149,6 +150,7 @@ char* myallocate(size_t size,char* file,int line,int type)
 			}
 			//find free pages
 			int pgReq=(int)num;
+			printf("I NEED %d PAGES\n",pgReq);
 			int pgList[pgReq];//list of free pages to use
 			int pgCount=0;
 			int i;
@@ -157,6 +159,7 @@ char* myallocate(size_t size,char* file,int line,int type)
 				//look for pages that can satisfy request
 				if(segments[i].used==0)
 				{
+					printf("pg %d is free\n",i);
 					pgList[pgCount]=i;
 					pgCount++;
 				}
@@ -176,6 +179,12 @@ char* myallocate(size_t size,char* file,int line,int type)
 				return NULL;
 			}
 			//set the metadata
+			printf("using pages: ");
+			for(i=0;i<pgReq;i++)
+			{
+				printf("%d, ",pgList[i]);
+			}
+			printf("\b\n");
 			int has=0; //maybe just keep a running count in an array
 			for(i=BOOK_STRT;i<BOOK_END;i++)
 			{
@@ -228,6 +237,7 @@ char* myallocate(size_t size,char* file,int line,int type)
 			{
 				if(pgList[i]==BOOK_STRT+has+i)
 				{
+					printf("-skip\n");
 					continue;
 				}
 				memBook temp=segments[pgList[i]];
@@ -243,7 +253,7 @@ char* myallocate(size_t size,char* file,int line,int type)
 				printf("ERROR: Memory protection failure\n");
 				exit(1);
 			}
-			return mem+has*sysconf(_SC_PAGE_SIZE)+sizeof(memHeader);
+			return mem+(has+BOOK_STRT)*sysconf(_SC_PAGE_SIZE)+sizeof(memHeader);
 
 
 		}
@@ -548,87 +558,18 @@ void mydeallocate(char* ptr,char* file,int line,int type)
 int main()
 {
 
-	tester* t=(tester*)myallocate(sizeof(tester),__FILE__,__LINE__,6);
-	//printf("size of short: %d, size of mem: %d\n", sizeof(short), (0xaa-0xa8));
+	char* t=myallocate(5000,__FILE__,__LINE__,6);
 	printf("mem: %p...|%p-%p\n",mem,mem+MEM_STRT,mem+MEM_SIZE);
-	printf("sizeof(tester)=%lu\n",sizeof(tester));
+//	printf("sizeof(tester)=%lu\n",sizeof(tester));
 //	printf("+%p\n",((memHeader*)((memHeader*)((char*)t-sizeof(memHeader)))->next)->next);
 	printf("t Given ptr=%p\n",t);
-	t->a=4;
-	printf("in t:%d\n",t->a);
-	/*
-	short* u=(short*)myallocate(sizeof(short),__FILE__,__LINE__,6);
-	printf("u Given ptr=%p\n",u);
-	short* v=(short*)myallocate(sizeof(short),__FILE__,__LINE__,6);
-	printf("v Given ptr=%p\n",v);
-	mydeallocate((char*)u,__FILE__,__LINE__,6);
-	short* a=(short*)myallocate(sizeof(short),__FILE__,__LINE__,6);
-	printf("a Given ptr=%p\n",a);
-
-	mydeallocate((char*)t,__FILE__,__LINE__,6);
-	printf("=\n");
-	mydeallocate((char*)a,__FILE__,__LINE__,6);
-	printf("==\n");
-	mydeallocate((char*)v,__FILE__,__LINE__,6);
-	*/
-	printf("---------------------------------\n");
-	id=2;
-	if(mprotect(mem,MEM_SIZE,PROT_NONE)==-1)
+	int i;
+	for(i=0;i<5000;i++)
 	{
-		printf("ERROR: Memory could not be protected");
-		exit(EXIT_FAILURE);
+		printf("i=%d\n",i);
+		t[i]='d';
 	}
-	tester* o=(tester*)myallocate(sizeof(tester),__FILE__,__LINE__,6);
-	printf("o Given ptr=%p\n",o);
-	o->a=-9;
-	printf("in o:%d\n",o->a);
-	printf("----------------------------------\n");
-	id=1;
-	if(mprotect(mem,MEM_SIZE,PROT_NONE)==-1)
-	{
-		printf("ERROR: Memory could not be protected");
-		exit(EXIT_FAILURE);
-	}
-	tester* u=(tester*)myallocate(sizeof(tester),__FILE__,__LINE__,6);
-	printf("u Given ptr=%p\n",u);
-	tester* v=(tester*)myallocate(sizeof(tester),__FILE__,__LINE__,6);
-	printf("v Given ptr=%p\n",v);
-	u->b='g';
-	printf("in t again:%d\n",t->a);
-	mydeallocate((char*)t,__FILE__,__LINE__,6);
-	printf("-----------------------------------\n");
-	id=2;
-	if(mprotect(mem,MEM_SIZE,PROT_NONE)==-1)
-	{
-		printf("ERROR: Memory could not be protected");
-		exit(EXIT_FAILURE);
-	}
-	printf("in o:%d\n",o->a);
-	printf("-----------------------------------\n");
-	id=1;
-	if(mprotect(mem,MEM_SIZE,PROT_NONE)==-1)
-	{
-		printf("ERROR: Memory could not be protected");
-		exit(EXIT_FAILURE);
-	}
-	tester* a=(tester*)myallocate(sizeof(tester),__FILE__,__LINE__,6);
-	printf("a Given ptr=%p\n",a);
-	printf("-----------------------------------\n");
-	id=2;
-	if(mprotect(mem,MEM_SIZE,PROT_NONE)==-1)
-	{
-		printf("ERROR: Memory could not be protected");
-		exit(EXIT_FAILURE);
-	}
-	mydeallocate((char*)o,__FILE__,__LINE__,6);
-	printf("-----------------------------------\n");
-	id=3;
-	if(mprotect(mem,MEM_SIZE,PROT_NONE)==-1)
-	{
-		printf("ERROR: Memory could not be protected");
-		exit(EXIT_FAILURE);
-	}
-	tester* z=(tester*)myallocate(sizeof(tester),__FILE__,__LINE__,6);
-	printf("z Given ptr=%p\n",z);
+	t[4999]='\0';
+	printf("t string:%s\n",t);
 	return 0;
 }
