@@ -84,13 +84,13 @@ static void handler(int signum,siginfo_t* si,void* unused)
 			}
 		}
 		//couldn't find page, handle as seg fault?
-		printf("(sh) Segmentation fault (Core Dumped)\n");
+		printf("(sh) Segmentation fault\n");
 		exit(EXIT_FAILURE);
 	}
 	else
 	{
 		//real segfault
-		printf("(sh) Segmentation Fault (core dumped)\n");
+		printf("(sh) Segmentation Fault (this was real)\n");
 		exit(EXIT_FAILURE); //didn't specify what to do
 	}
 	return;
@@ -151,6 +151,7 @@ char* myallocate(size_t size,char* file,int line,int type)
 			//find page it owns that can fit req
 			for(a=BOOK_STRT;a<BOOK_END;a++)
 			{
+				printf("$ owner:%d\n",segments[a].tid);
 				char* ptr=mem+a*sysconf(_SC_PAGE_SIZE);
 				if(segments[a].tid==id)//change to curr->id
 				{
@@ -159,12 +160,16 @@ char* myallocate(size_t size,char* file,int line,int type)
 					int best=sysconf(_SC_PAGE_SIZE);
 					int sz;
 					char* was=mem+(segments[a].pageNum+BOOK_STRT)*sysconf(_SC_PAGE_SIZE);//where it should be
+					int offset=was-(mem+a*sysconf(_SC_PAGE_SIZE));
+					printf("offset:%d\n",offset);
+					memHeader* toSet=NULL;
 					memHeader* bestFit=NULL;
 					memHeader* curr=(memHeader*)ptr;
 					printf("pgNUM=%d\n",segments[a].pageNum);
 					printf("%p!=%p\n",was,mem+(segments[a].pageNum+1+BOOK_STRT)*sysconf(_SC_PAGE_SIZE));
 					while(was!=mem+(segments[a].pageNum+1+BOOK_STRT)*sysconf(_SC_PAGE_SIZE))
 					{
+						printf("cur=%p\n",curr);
 						printf("!\n");
 						if(curr->free!=0)
 						{
@@ -174,35 +179,48 @@ char* myallocate(size_t size,char* file,int line,int type)
 							{
 								printf("-update\n");
 								best=sz;
-								bestFit=curr;
+								if(offset!=0)
+								{
+									bestFit=(memHeader*)was;
+								}
+								else
+								{
+									bestFit=curr;
+								}
+								toSet=curr;
 							}
 						}
+						//convention: set next/prev as if page was in right spot
+						char* temp=was;
 						was=curr->next;
-						curr=(memHeader*)curr->next;
+						printf("diff=%d\n",(signed)(curr->next-temp));
+						printf("c.n=%p, t=%p\n",curr->next,temp);
+						curr=(memHeader*)((char*)curr+((signed)(curr->next-temp)));
 					}
 					printf("-->%d\n",best);
 					printf("bf: %p\n",bestFit);
 					if(bestFit!=NULL)//found a fit, move to appropriate spot and return a ptr
 					{
 						printf("-found a fit\n");
-						bestFit->free=0;
+						toSet->free=0;
 						if((best-(signed)size)>sizeof(memHeader))
 						{
 							memHeader rest;
 							rest.id=id; //change for curr->tid
 							rest.free=1;
 							rest.prev=(char*)bestFit;
-							rest.next=bestFit->next;
+							rest.next=(char*)bestFit->next;
 							rest.verify=VER;
-							bestFit->next=(char*)bestFit+size;//!!!
-							memcpy((void*)(((char*)bestFit)+size),(void*)&rest,sizeof(memHeader));
+							printf("setting next to %p\n",((char*)bestFit)+size);
+							toSet->next=((char*)bestFit)+size;//!!!
+							memcpy((void*)(((char*)toSet)+size),(void*)&rest,sizeof(memHeader));
 						}
 						if((a-BOOK_STRT)!=segments[a].pageNum)//move to right spot
 						{
 							printf("== MOVE ==\n");
 							printf("a=%d, pgNum=%d\n",a,segments[a].pageNum);
 
-							int loc=segments[a].pageNum+a;
+							int loc=segments[a].pageNum+BOOK_STRT;
 							memBook temp=segments[a];
 							char tempData[sysconf(_SC_PAGE_SIZE)];
 							memcpy(tempData,mem+a*sysconf(_SC_PAGE_SIZE),sysconf(_SC_PAGE_SIZE));
@@ -235,6 +253,7 @@ char* myallocate(size_t size,char* file,int line,int type)
 			//look for a free page
 			if(segments[a].used==0)
 			{
+				printf("found a clean page @ %d\n",a);
 				segments[a].used=1;
 				segments[a].tid=id;//change to curr->id
 				segments[a].pageNum=has;
@@ -441,6 +460,8 @@ int main()
 	}
 	tester* u=(tester*)myallocate(sizeof(tester),__FILE__,__LINE__,6);
 	printf("u Given ptr=%p\n",u);
+	tester* v=(tester*)myallocate(sizeof(tester),__FILE__,__LINE__,6);
+	printf("v Given ptr=%p\n",v);
 	u->b='g';
 	printf("in t again:%d\n",t->a);
 	//mydeallocate((char*)t,__FILE__,__LINE__,6);
