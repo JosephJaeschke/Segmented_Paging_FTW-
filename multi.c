@@ -64,10 +64,6 @@ static void handler(int signum,siginfo_t* si,void* unused)
 		}
 		for(i=BOOK_STRT;i<BOOK_END;i++)
 		{
-			if(segments[i].tid!=-1)
-			{
-				printf("found your page %d @ %d\n",segments[i].pageNum,i);
-			}
 			if(segments[i].tid==id&&segments[i].pageNum==find)
 			{
 				//printf("(sh) found it b/c id=%d\n",segments[i].tid);
@@ -84,6 +80,11 @@ static void handler(int signum,siginfo_t* si,void* unused)
 					printf("ERROR: Memory protection failure\n");
 					exit(1);
 				}
+				if(mprotect(mem+find*sysconf(_SC_PAGE_SIZE),sysconf(_SC_PAGE_SIZE),PROT_READ|PROT_WRITE)==-1)
+				{
+					printf("ERROR: Memory protection failure\n");
+					exit(1);
+				}//i think this speeds things up
 				return;
 			}
 		}
@@ -146,7 +147,7 @@ char* myallocate(size_t size,char* file,int line,int type)
 		if(size>sysconf(_SC_PAGE_SIZE))
 		{
 			double num=(double)size/sysconf(_SC_PAGE_SIZE);
-			printf("raw num=%f\n",num);
+			//printf("raw num=%f\n",num);
 			int tempSize=(signed)size;
 			if(num-(int)num!=0)
 			{
@@ -154,7 +155,7 @@ char* myallocate(size_t size,char* file,int line,int type)
 			}
 			//find free pages
 			int pgReq=(int)num;
-			printf("I NEED %d PAGES\n",pgReq);
+			//printf("I NEED %d PAGES\n",pgReq);
 			int pgList[pgReq];//list of free pages to use
 			int pgCount=0;
 			int i;
@@ -163,7 +164,7 @@ char* myallocate(size_t size,char* file,int line,int type)
 				//look for pages that can satisfy request
 				if(segments[i].used==0)
 				{
-					printf("pg %d is free\n",i);
+			//		printf("pg %d is free\n",i);
 					pgList[pgCount]=i;
 					pgCount++;
 				}
@@ -183,12 +184,12 @@ char* myallocate(size_t size,char* file,int line,int type)
 				return NULL;
 			}
 			//set the metadata
-			printf("using pages: ");
-			for(i=0;i<pgReq;i++)
-			{
-				printf("%d, ",pgList[i]);
-			}
-			printf("\b\n");
+			//printf("using pages: ");
+			//for(i=0;i<pgReq;i++)
+			//{
+			//	printf("%d, ",pgList[i]);
+			//}
+			//printf("\b\n");
 			int has=0; //maybe just keep a running count in an array
 			for(i=BOOK_STRT;i<BOOK_END;i++)
 			{
@@ -198,7 +199,7 @@ char* myallocate(size_t size,char* file,int line,int type)
 					has++;
 				}
 			}
-			printf("has=%d\n",has);
+			//printf("has=%d\n",has);
 			for(i=0;i<pgCount;i++)
 			{
 				//set each of the memBook entries for the new pages
@@ -206,8 +207,8 @@ char* myallocate(size_t size,char* file,int line,int type)
 				segments[pgList[i]].tid=id;//change to curr->id
 				segments[pgList[i]].pageNum=pgCount-i; //how many pages are after it for this chunk
 				segments[pgList[i]].pageNum=has+i; //where each page will belong when loaded properly
-				printf("pgList[i]=%d\n",pgList[i]);
-				printf("pgList[i].numPages=%d\n",segments[pgList[i]].numPages);
+				//printf("pgList[i]=%d\n",pgList[i]);
+				//printf("pgList[i].numPages=%d\n",segments[pgList[i]].numPages);
 				if(i==0)
 				{
 					segments[pgList[i]].first_in_chain=1;
@@ -218,6 +219,7 @@ char* myallocate(size_t size,char* file,int line,int type)
 				}
 
 			}
+			segments[pgList[0]].numPages=pgReq;
 			//make a header for the first page (only first page gets one)
 			memHeader new;
 			new.id=id;//change to curr->id
@@ -453,8 +455,10 @@ void coalesce(char* ptr)
 	char* pgEnd=mem+(segIndex+1)*sysconf(_SC_PAGE_SIZE);
 	if(segments[segIndex].first_in_chain!=0)
 	{
+		printf("sI=%d\n",segIndex);
 		int i;
 		int tempPages=segments[segIndex].numPages;
+		printf("tP=%d\n",tempPages);
 		for(i=0;i<tempPages;i++)
 		{
 			segments[segIndex+i].used=0;
@@ -532,7 +536,7 @@ void mydeallocate(char* ptr,char* file,int line,int type)
 	printf("ver=%d\n",real->verify   );
 	printf("in dealloc %p - %p\n", real, real->next);
 	//printf(">%lu\n",((char*)real-mem)/sysconf(_SC_PAGE_SIZE));
-	if (type!=0)
+	if(1)//i don't think it matters if its sys mem or not
 	{
 		//non-system request for free
 		if(real->verify!=VER)
@@ -551,7 +555,6 @@ void mydeallocate(char* ptr,char* file,int line,int type)
 	}
 	else
 	{
-		//sys wants to free mem
 	}
 	ptr=NULL;
 	if(mprotect(mem,MEM_SIZE,PROT_NONE)==-1)
@@ -577,5 +580,8 @@ int main()
 	}
 	t[4999]='\0';
 	printf("t string:%s\n",t);
+	mydeallocate(t,__FILE__,__LINE__,6);
+	char* hey=myallocate(sizeof(char),__FILE__,__LINE__,6);
+	printf("hey given ptr=%p\n",hey);
 	return 0;
 }
