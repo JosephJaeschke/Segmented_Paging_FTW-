@@ -168,6 +168,11 @@ char* myallocate(size_t size,char* file,int line,int type)
 			if(pgCount!=pgReq)
 			{
 				//not enough free pages
+				if(mprotect(mem,MEM_SIZE,PROT_NONE)==-1)
+				{
+					printf("ERROR: Memory protection failure\n");
+					exit(1);
+				}
 				return NULL;
 			}
 			//set the metadata
@@ -225,12 +230,25 @@ char* myallocate(size_t size,char* file,int line,int type)
 				{
 					continue;
 				}
-				//actually move
+				memBook temp=segments[pgList[i]];
+				char* dataTemp[sysconf(_SC_PAGE_SIZE)];
+				memcpy(dataTemp,mem+(pgList[i])*sysconf(_SC_PAGE_SIZE),sysconf(_SC_PAGE_SIZE));
+				segments[pgList[i]]=segments[BOOK_STRT+has+i];
+		memcpy(mem+(pgList[i])*sysconf(_SC_PAGE_SIZE),mem+(BOOK_STRT+has+i)*sysconf(_SC_PAGE_SIZE),sysconf(_SC_PAGE_SIZE));
+				segments[BOOK_STRT+has+i]=temp;
+				memcpy(mem+(BOOK_STRT+has+i)*sysconf(_SC_PAGE_SIZE),dataTemp,sysconf(_SC_PAGE_SIZE));
 			}
+			if(mprotect(mem,MEM_SIZE,PROT_NONE)==-1)
+			{
+				printf("ERROR: Memory protection failure\n");
+				exit(1);
+			}
+			return mem+has*sysconf(_SC_PAGE_SIZE)+sizeof(memHeader);
 
 
 		}
 		//if req size is larger than page and not enough pages left, above will return NULL before this point
+		//req for less than or equal to a page
 		int a,has=0;
 		for(a=BOOK_STRT;a<BOOK_END;a++)
 		{
@@ -416,6 +434,21 @@ void coalesce(char* ptr)
 	int segIndex=(ptr-mem)/sysconf(_SC_PAGE_SIZE);
 	char* pgStart=mem+segIndex*sysconf(_SC_PAGE_SIZE);
 	char* pgEnd=mem+(segIndex+1)*sysconf(_SC_PAGE_SIZE);
+	if(segments[segIndex].first_in_chain!=0)
+	{
+		int i;
+		int tempPages=segments[segIndex].numPages;
+		for(i=0;i<tempPages;i++)
+		{
+			segments[segIndex+i].used=0;
+			segments[segIndex+i].tid=-1;
+			segments[segIndex+i].pageNum=-1;
+			segments[segIndex+i].first_in_chain=0;
+			segments[segIndex+i].numPages=0;
+		}
+		return;
+
+	}
 	memHeader* nxt=(memHeader*)((memHeader*)ptr)->next;
 	memHeader* prv=(memHeader*)((memHeader*)ptr)->prev;
 	if(prv==NULL&&(char*)nxt==pgEnd)
@@ -504,6 +537,11 @@ void mydeallocate(char* ptr,char* file,int line,int type)
 		//sys wants to free mem
 	}
 	ptr=NULL;
+	if(mprotect(mem,MEM_SIZE,PROT_NONE)==-1)
+	{
+		printf("ERROR: Memory protection failure\n");
+		exit(1);
+	}
 	return;
 }
 
