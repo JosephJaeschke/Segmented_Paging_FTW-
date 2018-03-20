@@ -464,6 +464,40 @@ int main()
 	printf("v Given ptr=%p\n",v);
 	u->b='g';
 	printf("in t again:%d\n",t->a);
-	//mydeallocate((char*)t,__FILE__,__LINE__,6);
+	mydeallocate((char*)t,__FILE__,__LINE__,6);
+	printf("-----------------------------------\n");
+	id=2;
+	if(mprotect(mem,MEM_SIZE,PROT_NONE)==-1)
+	{
+		printf("ERROR: Memory could not be protected");
+		exit(EXIT_FAILURE);
+	}
+	printf("in o:%d\n",o->a);
+	printf("-----------------------------------\n");
+	id=1;
+	if(mprotect(mem,MEM_SIZE,PROT_NONE)==-1)
+	{
+		printf("ERROR: Memory could not be protected");
+		exit(EXIT_FAILURE);
+	}
+	tester* a=(tester*)myallocate(sizeof(tester),__FILE__,__LINE__,6);
+	printf("a Given ptr=%p\n",a);
+	printf("-----------------------------------\n");
+	id=2;
+	if(mprotect(mem,MEM_SIZE,PROT_NONE)==-1)
+	{
+		printf("ERROR: Memory could not be protected");
+		exit(EXIT_FAILURE);
+	}
+	mydeallocate((char*)o,__FILE__,__LINE__,6);
+	printf("-----------------------------------\n");
+	id=3;
+	if(mprotect(mem,MEM_SIZE,PROT_NONE)==-1)
+	{
+		printf("ERROR: Memory could not be protected");
+		exit(EXIT_FAILURE);
+	}
+	tester* z=(tester*)myallocate(sizeof(tester),__FILE__,__LINE__,6);
+	printf("z Given ptr=%p\n",z);
 	return 0;
 }
