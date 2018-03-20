@@ -282,9 +282,8 @@ char* myallocate(size_t size,char* file,int line,int type)
 			//find page it owns that can fit req
 			for(a=BOOK_STRT;a<BOOK_END;a++)
 			{
-				printf("$ owner:%d\n",segments[a].tid);
 				char* ptr=mem+a*sysconf(_SC_PAGE_SIZE);
-				if(segments[a].tid==id)//change to curr->id
+				if(segments[a].tid==id&&segments[a].first_in_chain==-1)//change to curr->id
 				{
 					printf("-found @ pg %d\n",a);
 					//apply best-fit
@@ -408,7 +407,7 @@ char* myallocate(size_t size,char* file,int line,int type)
 				}
 				memcpy(mem+a*sysconf(_SC_PAGE_SIZE),&new,sizeof(memHeader));
 				//move to first spot for usr mem
-				if((a-BOOK_STRT)!=0)
+				if((a-BOOK_STRT)!=0&&has==0)
 				{
 					printf("== MOVE ==\n");
 					//store clean mem+memBook
@@ -428,7 +427,7 @@ char* myallocate(size_t size,char* file,int line,int type)
 					printf("ERROR: Memory protection failure\n");
 					exit(1);
 				}
-				return mem+(BOOK_STRT)*sysconf(_SC_PAGE_SIZE)+sizeof(memHeader);
+				return mem+(BOOK_STRT+has)*sysconf(_SC_PAGE_SIZE)+sizeof(memHeader);
 			}
 		}
 		if(mprotect(mem,MEM_SIZE,PROT_NONE)==-1)
@@ -580,7 +579,7 @@ int main()
 	}
 	t[4999]='\0';
 	printf("t string:%s\n",t);
-	mydeallocate(t,__FILE__,__LINE__,6);
+	//mydeallocate(t,__FILE__,__LINE__,6);
 	char* hey=myallocate(sizeof(char),__FILE__,__LINE__,6);
 	printf("hey given ptr=%p\n",hey);
 	return 0;
