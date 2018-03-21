@@ -13,9 +13,9 @@
 #include <sys/time.h>
 #include <unistd.h>
 
-#define MAX_STACK 32000 //my TA told someone that 32k is a good number
-#define MAX_THREAD 64 //TA said a power of 2 and referenced 32
-#define MAX_MUTEX 64 //TA said a power of 2 and referenced 32
+#define MAX_STACK 65536 //my TA told someone that 32k is a good number
+#define MAX_THREAD 32 //TA said a power of 2 and referenced 32
+#define MAX_MUTEX 32 //TA said a power of 2 and referenced 32
 #define MAINTENANCE 10 //not sure a good value
 #define PRIORITY_LEVELS 5 //not sure good value
 
@@ -80,19 +80,16 @@ typedef struct ucontext {
 
 void wrapper(int f1,int f2,int a1,int a2)
 {
-	mask* p=malloc(sizeof(mask));
-	p->halfs.hhalf=a1;
-	p->halfs.lhalf=a2;
-	mask* s=malloc(sizeof(mask));
-	s->halfs.hhalf=f1;
-	s->halfs.lhalf=f2;
+	mask p;
+	p.halfs.hhalf=a1;
+	p.halfs.lhalf=a2;
+	mask s;
+	s.halfs.hhalf=f1;
+	s.halfs.lhalf=f2;
 
-	void* a=(void*)p->data;
-	void*(*f)(void*)=(void*(*)(void*))s->data;
+	void* a=(void*)p.data;
+	void*(*f)(void*)=(void*(*)(void*))s.data;
 
-	free(p);
-	free(s);
-	
 //	printf("--start wrapping\n");
 	curr->retVal=(*f)(a);
 //	printf("--done wrapping\n");
@@ -357,15 +354,13 @@ int my_pthread_create(my_pthread_t* thread, pthread_attr_t* attr, void*(*functio
 	t->state=1;
 
 
-	mask* params=malloc(sizeof(mask));
-	params->data=arg;
-	mask* subroutine=malloc(sizeof(mask));
-	subroutine->data=function;
+	mask params;
+	params.data=arg;
+	mask subroutine;
+	subroutine.data=function;
 
-	makecontext(&t->context,(void(*)(void))wrapper,4,subroutine->halfs.hhalf,subroutine->halfs.lhalf,params->halfs.hhalf,params->halfs.lhalf);
+	makecontext(&t->context,(void(*)(void))wrapper,4,subroutine.halfs.hhalf,subroutine.halfs.lhalf,params.halfs.hhalf,params.halfs.lhalf);
 
-	free(params);
-	free(subroutine);
 
 	if(queue[0]==NULL)
 	{

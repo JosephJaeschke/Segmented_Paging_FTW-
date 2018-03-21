@@ -16,7 +16,6 @@
 #define pthread_join my_pthread_join
 #define pthread_exit my_pthread_exit
 #define pthread_yield my_pthread_yield
-#define pthread_mutex_t my_pthread_mutex_t
 #define pthread_mutex_init my_pthread_mutex_init
 #define pthread_mutex_lock my_pthread_mutex_lock
 #define pthread_mutex_unlock my_pthread_mutex_unlock
@@ -33,7 +32,7 @@
 #include <ucontext.h>
 #include <signal.h>
 
-typedef uint my_pthread_t;
+typedef my_pthread_t unit;
 
 typedef struct threadControlBlock 
 {
@@ -49,13 +48,13 @@ typedef struct threadControlBlock
 } tcb; 
 
 /* mutex struct definition */
-typedef struct my_pthread_mutex_t 
+typedef struct my_pthread_mutex_t_
 {
 	int locked; //unlocked = 0; locked = 1; destroyed = 2;
 	tcb* waiting; //waiting queue of threads for this mutex, 
 	int maxP;
 	//first in waiting queue is first to run when mutex unlocked
-	struct my_pthread_mutex_t* next; //pointer to next mutex to create mutexList
+	struct my_pthread_mutex_t_* next; //pointer to next mutex to create mutexList
 } my_pthread_mutex_t;
 
 typedef union _mask
@@ -103,5 +102,6 @@ int my_pthread_mutex_unlock(my_pthread_mutex_t *mutex);
 
 /* destroy the mutex */
 int my_pthread_mutex_destroy(my_pthread_mutex_t *mutex);
+#define pthread_mutex_t my_pthread_mutex_t
 
 #endif
