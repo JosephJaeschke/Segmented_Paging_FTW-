@@ -6,6 +6,7 @@
 #include <malloc.h>
 #include <assert.h>
 #include <sys/mman.h>
+#include <limits.h>
 #include "mem.h"
 
 #define malloc(x) myallocate(x,__FILE__,__LINE__,1);
@@ -28,6 +29,7 @@ typedef struct tester_
 
 char* mem;
 int meminit=0;
+int sysinit=0;
 int shinit=0;
 struct sigaction sa;
 int id=1; //equivalent to curr->tid
@@ -161,8 +163,8 @@ char* shalloc(size_t size)
 			memcpy(mem+SHALLOC_STRT*sysconf(_SC_PAGE_SIZE)+size,&rest,sizeof(memHeader));
 		}
 		memcpy(mem+SHALLOC_STRT*sysconf(_SC_PAGE_SIZE),&new,sizeof(memHeader));
-		return mem+SHALLOC_STRT*sysconf(_SC_PAGE_SIZE)+sizeof(memHeader);
 		shinit=1;
+		return mem+SHALLOC_STRT*sysconf(_SC_PAGE_SIZE)+sizeof(memHeader);
 	}
 	char* ptr=mem+SHALLOC_STRT*sysconf(_SC_PAGE_SIZE);
 	memHeader* bestPtr=NULL;
@@ -191,8 +193,8 @@ char* shalloc(size_t size)
 			rest.prev=(char*)bestPtr;
 			rest.next=bestPtr->next;
 			rest.verify=VER;
-			bestPtr->next=(char*)bestPtr+size;
-			memcpy(bestPtr+size,&rest,sizeof(memHeader));
+			bestPtr->next=((char*)bestPtr)+size;
+			memcpy(((char*)bestPtr)+size,&rest,sizeof(memHeader));
 		}
 		return (char*)bestPtr+sizeof(memHeader);
 	}
@@ -223,377 +225,257 @@ char* myallocate(size_t size,char* file,int line,int type)
 			segments[i].tid=-1;
 			segments[i].pageNum=-1;
 			segments[i].first_in_chain=-1; 
-			segments[i].numPages=0;
 		}
 		meminit=1;
 	}
-	if(mprotect(mem,MEM_PROT,PROT_READ|PROT_WRITE)==-1)
+	if(mprotect(mem,MEM_PROT,PROT_NONE)==-1)//want sig handler to put things in place for us
 	{
 		printf("ERROR: Memory protection failure\n");
-		fflush(stdout);
 		exit(EXIT_FAILURE);
 	}
 	if(type!=0)
 	{
-		if(size>sysconf(_SC_PAGE_SIZE))
+		double num=((double)(size+sizeof(memHeader)))/sysconf(_SC_PAGE_SIZE);//extra memHeader for end of mem chunk
+		if(num-(int)num!=0)
 		{
-			double num=(double)size/sysconf(_SC_PAGE_SIZE);
-			//printf("raw num=%f\n",num);
-			if(num-(int)num!=0)
+			num++;
+		}
+		int pgReq=(int)num;
+		int i,has=0;
+		for(i=BOOK_STRT;i<BOOK_END;i++)
+		{
+			if(segments[i].tid==id) //change to curr->tid
 			{
-				num++;
+				has++;
 			}
-			//find free pages
-			int pgReq=(int)num;
-			//printf("I NEED %d PAGES\n",pgReq);
-			int pgList[pgReq];//list of free pages to use
+		}
+		if(has==0)
+		{
+			//find a free page
 			int pgCount=0;
-			int i;
+			int pgList[pgReq];
 			for(i=BOOK_STRT;i<BOOK_END;i++)
 			{
-				//look for pages that can satisfy request
-				if(segments[i].used==0)
+				if(segments[i].used==0)//find enough pages to fit request
 				{
-			//		printf("pg %d is free\n",i);
+					//no need to move anything as long as we own the spot
 					pgList[pgCount]=i;
 					pgCount++;
-				}
-				if(pgCount==pgReq)
-				{
-					break;
+					if(pgCount==pgReq)
+					{
+						break;
+					}
 				}
 			}
 			if(pgCount!=pgReq)
 			{
 				//not enough free pages
-				if(mprotect(mem,MEM_PROT,PROT_NONE)==-1)
-				{
-					printf("ERROR: Memory protection failure\n");
-					exit(1);
-				}
 				return NULL;
 			}
-			//set the metadata
-			//printf("using pages: ");
-			//for(i=0;i<pgReq;i++)
-			//{
-			//	printf("%d, ",pgList[i]);
-			//}
-			//printf("\b\n");
-			int has=0; //maybe just keep a running count in an array
-			for(i=BOOK_STRT;i<BOOK_END;i++)
+			for(i=0;i<pgReq;i++)
 			{
-				//looping through to count pages owned by current thread
-				if(segments[i].tid==id)//change to curr->id
-				{
-					has++;
-				}
-			}
-			//printf("has=%d\n",has);
-			for(i=0;i<pgCount;i++)
-			{
-				//set each of the memBook entries for the new pages
+				segments[pgList[i]].tid=id; //change to curr->id
+				segments[pgList[i]].pageNum=i;
 				segments[pgList[i]].used=1;
-				segments[pgList[i]].tid=id;//change to curr->id
-				segments[pgList[i]].pageNum=has+i; //where each page will belong when loaded properly
-				//printf("pgList[i]=%d\n",pgList[i]);
-				//printf("pgList[i].numPages=%d\n",segments[pgList[i]].numPages);
-				if(i==0)
-				{
-					segments[pgList[i]].first_in_chain=1;
-				}
-				else
-				{
-					segments[pgList[i]].first_in_chain=2;//dependant
-				}
-
 			}
-			segments[pgList[0]].numPages=pgReq;
-			//make a header for the first page (only first page gets one)
-			memHeader new;
-			new.id=id;//change to curr->id
+			memHeader new,rest;//will have a rest section since calced for one
 			new.verify=VER;
-			new.prev=NULL;
-			new.next=mem+(has+pgReq+BOOK_STRT)*sysconf(_SC_PAGE_SIZE);//when everything is loaded properly
 			new.free=0;
-			if((pgReq*sysconf(_SC_PAGE_SIZE))-size>sizeof(memHeader))
-			{
-				//if there is enough room for more data
-				//however, rest will never get used w/ current implementation, so idk
-				memHeader rest;
-				rest.id=id;//change to curr->id
-				rest.verify=VER;
-				rest.prev=mem+(has+BOOK_STRT)*sysconf(_SC_PAGE_SIZE);
-				new.next=mem+(has+BOOK_STRT+pgReq-1)*sysconf(_SC_PAGE_SIZE)+(size%sysconf(_SC_PAGE_SIZE));
-				rest.next=mem+(has+pgReq+BOOK_STRT)*sysconf(_SC_PAGE_SIZE);
-				rest.free=1;
-				memcpy(mem+(pgList[pgReq-1])*sysconf(_SC_PAGE_SIZE),&rest,sizeof(memHeader));
-			}
-			memcpy(mem+(pgList[0])*sysconf(_SC_PAGE_SIZE),&new,sizeof(memHeader));
-			//move each page to right spot
-			for(i=0;i<pgCount;i++)
-			{
-				if(pgList[i]==BOOK_STRT+has+i)
-				{
-					printf("-skip\n");
-					continue;
-				}
-				memBook temp=segments[pgList[i]];
-				char* dataTemp[sysconf(_SC_PAGE_SIZE)];
-				memcpy(dataTemp,mem+(pgList[i])*sysconf(_SC_PAGE_SIZE),sysconf(_SC_PAGE_SIZE));
-				segments[pgList[i]]=segments[BOOK_STRT+has+i];
-		memcpy(mem+(pgList[i])*sysconf(_SC_PAGE_SIZE),mem+(BOOK_STRT+has+i)*sysconf(_SC_PAGE_SIZE),sysconf(_SC_PAGE_SIZE));
-				segments[BOOK_STRT+has+i]=temp;
-				memcpy(mem+(BOOK_STRT+has+i)*sysconf(_SC_PAGE_SIZE),dataTemp,sysconf(_SC_PAGE_SIZE));
-			}
-			if(mprotect(mem,MEM_PROT,PROT_NONE)==-1)
-			{
-				printf("ERROR: Memory protection failure\n");
-				exit(1);
-			}
-			return mem+(has+BOOK_STRT)*sysconf(_SC_PAGE_SIZE)+sizeof(memHeader);
-
-
+			new.prev=NULL;
+			new.next=mem+BOOK_STRT*sysconf(_SC_PAGE_SIZE)+size;
+			rest.verify=VER;
+			rest.free=1;
+			rest.prev=mem+BOOK_STRT*sysconf(_SC_PAGE_SIZE);
+			rest.next=mem+(BOOK_STRT+pgReq)*sysconf(_SC_PAGE_SIZE);
+			//memcpy will trigger SIGSEGV, but handler will find the page and swap it in
+			memcpy(mem+BOOK_STRT*sysconf(_SC_PAGE_SIZE),&new,sizeof(memHeader));
+			memcpy(mem+BOOK_STRT*sysconf(_SC_PAGE_SIZE)+size,&rest,sizeof(memHeader));
+			return mem+BOOK_STRT*sysconf(_SC_PAGE_SIZE)+sizeof(memHeader);
 		}
-		//if req size is larger than page and not enough pages left, above will return NULL before this point
-		//req for less than or equal to a page
-		int a,has=0;
-		for(a=BOOK_STRT;a<BOOK_END;a++)
+		else //we already have pages
 		{
-			if(segments[a].tid==id) //change to curr->tid
+			//see if request fits in already owned region
+			char* ptr=mem+BOOK_STRT*sysconf(_SC_PAGE_SIZE);
+			char* lastPtr=NULL;
+			memHeader* bestPtr=NULL;
+			int best=INT_MAX;
+			while(ptr!=mem+(BOOK_STRT+has)*sysconf(_SC_PAGE_SIZE))//while we still own the pages
 			{
-				has++;
-			}
-		}
-		if(has>0)
-		{
-			printf("-1\n");
-			//find page it owns that can fit req
-			for(a=BOOK_STRT;a<BOOK_END;a++)
-			{
-				char* ptr=mem+a*sysconf(_SC_PAGE_SIZE);
-				if(segments[a].tid==id&&segments[a].first_in_chain==-1)//change to curr->id
+				int sz;
+				if(((memHeader*)ptr)->free!=0)
 				{
-					printf("-found @ pg %d\n",a);
-					//apply best-fit
-					int best=sysconf(_SC_PAGE_SIZE);
-					int sz;
-					char* was=mem+(segments[a].pageNum+BOOK_STRT)*sysconf(_SC_PAGE_SIZE);//where it should be
-					int offset=was-(mem+a*sysconf(_SC_PAGE_SIZE));//how far into the page we are
-					//printf("offset:%d\n",offset);
-					memHeader* toSet=NULL; //current loc in mem so data can be set with this pointer
-					memHeader* bestFit=NULL; //bestFit as if mem was loaded in correct page place
-					memHeader* curr=(memHeader*)ptr;//points to curr loc in mem, NOT WHERE THE PAGE THINKS IT IS
-					//printf("pgNUM=%d\n",segments[a].pageNum);
-					//printf("%p!=%p\n",was,mem+(segments[a].pageNum+1+BOOK_STRT)*sysconf(_SC_PAGE_SIZE));
-					while(was!=mem+(segments[a].pageNum+1+BOOK_STRT)*sysconf(_SC_PAGE_SIZE))
+					sz=(((memHeader*)ptr)->next)-ptr;
+					if(abs(best-(signed)size)>abs(sz-(signed)size)&&(sz-(signed)size)>=0)
 					{
-						printf("cur=%p\n",curr);
-						printf("!\n");
-						if(curr->free!=0)
-						{
-							sz=((char*)curr->next)-((char*)was);//big enough for req size+header
-							printf("->%d, %d\n",sz,sz-(signed)size);
-							if((abs(best-(signed)size)>abs(sz-(signed)size))&&(sz-(signed)size)>=0)
-							{
-								printf("-update\n");
-								best=sz;
-								if(offset!=0)
-								{
-									bestFit=(memHeader*)was;
-								}
-								else
-								{
-									bestFit=curr;
-								}
-								toSet=curr;
-							}
-						}
-						//convention: set next/prev as if page was in right spot
-						char* temp=was;
-						was=curr->next;
-						printf("diff=%d\n",(signed)(curr->next-temp));
-						printf("c.n=%p, t=%p\n",curr->next,temp);
-						curr=(memHeader*)((char*)curr+((signed)(curr->next-temp)));
+						best=sz;
+						bestPtr=(memHeader*)ptr;
 					}
-					printf("-->%d\n",best);
-					printf("bf: %p\n",bestFit);
-					if(bestFit!=NULL)//found a fit, move to appropriate spot and return a ptr
-					{
-						printf("-found a fit\n");
-						toSet->free=0;
-						if((best-(signed)size)>sizeof(memHeader))
-						{
-							memHeader rest;
-							rest.id=id; //change for curr->tid
-							rest.free=1;
-							rest.prev=(char*)bestFit;
-							rest.next=(char*)bestFit->next;
-							rest.verify=VER;
-							printf("setting next to %p\n",((char*)bestFit)+size);
-							toSet->next=((char*)bestFit)+size;//!!!
-							memcpy((void*)(((char*)toSet)+size),(void*)&rest,sizeof(memHeader));
-						}
-						if((a-BOOK_STRT)!=segments[a].pageNum)//move to right spot
-						{
-							printf("== MOVE ==\n");
-							printf("a=%d, pgNum=%d\n",a,segments[a].pageNum);
-
-							int loc=segments[a].pageNum+BOOK_STRT;
-							memBook temp=segments[a];
-							char tempData[sysconf(_SC_PAGE_SIZE)];
-							memcpy(tempData,mem+a*sysconf(_SC_PAGE_SIZE),sysconf(_SC_PAGE_SIZE));
-							//
-							segments[a]=segments[loc];
-					memcpy(mem+a*sysconf(_SC_PAGE_SIZE),mem+loc*sysconf(_SC_PAGE_SIZE),sysconf(_SC_PAGE_SIZE));
-							
-							segments[loc]=temp;
-							memcpy(mem+loc*sysconf(_SC_PAGE_SIZE),tempData,sysconf(_SC_PAGE_SIZE));
-						}
-						if(mprotect(mem,MEM_PROT,PROT_NONE)==-1)
-						{
-							printf("ERROR: Memory protection problem\n");
-							exit(1);
-						}
-						return (char*)bestFit+sizeof(memHeader);
-					}
-
-
 				}
+				lastPtr=ptr;
+				ptr=((memHeader*)ptr)->next;
 			}
-		}
-		printf("-2\n");
-		//thread has no pages or can't fit req size
-		for(a=BOOK_STRT;a<BOOK_END;a++)
-		{
-			//look for a free page
-			if(segments[a].used==0)
+			if(bestPtr!=NULL)
 			{
-				printf("found a clean page @ %d\n",a);
-				segments[a].used=1;
-				segments[a].tid=id;//change to curr->id
-				segments[a].pageNum=has;
-				segments[a].first_in_chain=0;
-				segments[a].numPages=0;
-				memHeader new;
-				new.free=0;
-				new.prev=NULL;
-				printf("new.next=%p\n",mem+(has+1+BOOK_STRT)*sysconf(_SC_PAGE_SIZE));
-				new.next=mem+(has+1+BOOK_STRT)*sysconf(_SC_PAGE_SIZE);
-				new.verify=VER;
-				new.id=id;//CHANGE FOR THREAD ID
-				if(sysconf(_SC_PAGE_SIZE)-size>sizeof(memHeader))
+				bestPtr->free=0;
+				if(best-(signed)size>sizeof(memHeader))
 				{
+					//can potentially create 2 contiguous free segments. Will be fixed after the closest
+					//non-free segment is freed
+					//could check here (will do later since not too important)
 					memHeader rest;
-					rest.prev=mem+(has+BOOK_STRT)*sysconf(_SC_PAGE_SIZE);
-					new.next=mem+(has+BOOK_STRT)*sysconf(_SC_PAGE_SIZE)+size;
-					rest.next=mem+(has+1+BOOK_STRT)*sysconf(_SC_PAGE_SIZE);
-				//	printf("new.next=%p\n",new.next);
-					rest.verify=VER;
-					rest.id=id;
 					rest.free=1;
-					memcpy(mem+a*sysconf(_SC_PAGE_SIZE)+size,&rest,sizeof(memHeader));
+					rest.prev=(char*)bestPtr;
+					rest.next=bestPtr->next;
+					rest.verify=VER;
+					bestPtr->next=((char*)bestPtr)+size;
+					memcpy(((char*)bestPtr)+size,&rest,sizeof(memHeader));
 				}
-				memcpy(mem+a*sysconf(_SC_PAGE_SIZE),&new,sizeof(memHeader));
-				//move to first spot for usr mem
-				if((a-BOOK_STRT)!=0&&has==0)
+				return ((char*)bestPtr)+sizeof(memHeader);
+			}
+			//need to stick request at end
+			if(((memHeader*)lastPtr)->free!=0)
+			{
+				//stick request on end
+				int roomLeft=(((memHeader*)lastPtr)->next)-lastPtr-sizeof(memHeader); //!
+				double newNum=(((signed)size)-(double)roomLeft)/sysconf(_SC_PAGE_SIZE); //!
+				if(newNum-(int)newNum!=0)
 				{
-					printf("== MOVE ==\n");
-					//store clean mem+memBook
-					memBook temp=segments[a];
-					char tempData[sysconf(_SC_PAGE_SIZE)];
-					memcpy(tempData,mem+a*sysconf(_SC_PAGE_SIZE),sysconf(_SC_PAGE_SIZE));
-					//move out what was in first spot
-					segments[a]=segments[BOOK_STRT+has];
-			memcpy(mem+a*sysconf(_SC_PAGE_SIZE),mem+has+BOOK_STRT*sysconf(_SC_PAGE_SIZE),sysconf(_SC_PAGE_SIZE));
-					//move in clean page
-					segments[BOOK_STRT+has]=temp;
-					memcpy(mem+(BOOK_STRT+has)*sysconf(_SC_PAGE_SIZE),tempData,sysconf(_SC_PAGE_SIZE));
-
+					newNum++;
 				}
-				if(mprotect(mem,MEM_PROT,PROT_NONE)==-1)
+				int newReq=(int)newNum;
+				int newCount=0;
+				//look for clean pages
+				for(i=BOOK_STRT;i<BOOK_END;i++)
 				{
-					printf("ERROR: Memory protection failure\n");
-					exit(1);
+					if(segments[i].used==0)
+					{
+						segments[i].used=1;
+						segments[i].tid=id;//change to curr->id
+						segments[i].pageNum=has+newCount;
+						newCount++;
+						if(newCount==newReq)
+						{
+							break;
+						}
+					}
 				}
+				if(newCount!=newReq)
+				{
+					//can't find enough mem
+					return NULL;
+				}
+				//prev stays the same
+				//verify stays the same
+				((memHeader*)lastPtr)->free=0;
+				((memHeader*)lastPtr)->next=lastPtr+size;
+				memHeader rest;
+				rest.free=1;
+				rest.prev=lastPtr;
+				rest.next=mem+(BOOK_STRT+has+pgReq)*sysconf(_SC_PAGE_SIZE); //!
+				rest.verify=VER;
+				memcpy(lastPtr+size,&rest,sizeof(memHeader));
+				return lastPtr+sizeof(memHeader);
+			}
+			else
+			{
+				//stick request on end, but not including last chunk
+				//last pointer was not free and ended right on page boundary
+				//all last ptrs will have their next point to page boundary
+				int pgList[pgReq];
+				int pgCount=0;
+				for(i=BOOK_STRT;i<BOOK_END;i++)
+				{
+					if(segments[i].used==0)
+					{
+						pgList[pgCount]=i;
+						pgCount++;
+						if(pgCount==pgReq)
+						{
+							break;
+						}
+					}
+				}
+				if(pgCount!=pgReq)
+				{
+					//could not find enough free pages
+					return NULL;
+				}
+				for(i=0;i<pgCount;i++)
+				{
+					segments[i].tid=id; //chnge to curr->id
+					segments[i].pageNum=has+i;
+					segments[i].used=1;
+				}
+				memHeader new,rest;
+				new.free=0;
+				new.verify=VER;
+				new.prev=lastPtr;
+				new.next=mem+(BOOK_STRT+has)*sysconf(_SC_PAGE_SIZE)+size;
+				rest.free=1;
+				rest.verify=VER;
+				rest.prev=mem+(BOOK_STRT+has)*sysconf(_SC_PAGE_SIZE);
+				rest.next=mem+(BOOK_STRT+has+pgReq)*sysconf(_SC_PAGE_SIZE);
+				memcpy(mem+(BOOK_STRT+has)*sysconf(_SC_PAGE_SIZE),&new,sizeof(memHeader));
+				memcpy(mem+(BOOK_STRT+has)*sysconf(_SC_PAGE_SIZE)+size,&rest,sizeof(memHeader));
 				return mem+(BOOK_STRT+has)*sysconf(_SC_PAGE_SIZE)+sizeof(memHeader);
 			}
 		}
-		if(mprotect(mem,MEM_PROT,PROT_NONE)==-1)
-		{
-			printf("ERROR: Memory protection failure\n");
-			exit(1);
-		}
-		return NULL;
 	}
 	else //sys req for mem
 	{
-		if(size>sysconf(_SC_PAGE_SIZE))
+		//just like shalloc
+		if(sysinit==0)
 		{
-			double num=(double)size/sysconf(_SC_PAGE_SIZE);
-			if(num-(int)num!=0)
-			{
-				num++;
-			}
-			int pgReq=(int)num;
-			int pgList[pgReq];
-			int pgCount=0;
-			int i;
-			for(i=0;i<BOOK_STRT;i++)
-			{
-				if(segments[i].used==0)
-				{
-					pgList[pgCount]=i;
-					pgCount++;
-				}
-				if(pgCount==pgReq)
-				{
-					break;
-				}
-			}
-			if(pgCount!=pgReq)
-			{
-				if(mprotect(mem,MEM_PROT,PROT_NONE)==-1)
-				{
-					printf("ERROR: Memory protection failure\n");
-					exit(1);
-				}
-				return NULL;
-			}
-			int has=0;
-			for(i=0;i<BOOK_STRT;i++)
-			{
-				if(segments[i].used==1)
-				{
-					has++;
-				}
-			}
-			for(i=0;i<pgCount;i++)
-			{
-				segments[pgList[i]].tid=0;
-				segments[pgList[i]].used=1;
-				segments[pgList[i]].pageNum=has+i;
-				if(i==0)
-				{
-					segments[pgList[i]].first_in_chain=1;
-				}
-				else
-				{
-					segments[pgList[i]].first_in_chain=2;
-				}
-			}
-			segments[pgList[0]].numPages=pgReq;
-			//header stuff
-			memHeader new;
-			new.id=0;
-			new.free=0;
+			memHeader new,rest;
 			new.verify=VER;
 			new.prev=NULL;
-			new.next=mem+(has+pgReq)*sysconf(_SC_PAGE_SIZE);
-			
+			new.next=mem+size;
+			new.free=0;
+			//don't need to check for room for rest
+			//sys will never request for all the space in one call
+			rest.verify=VER;
+			rest.prev=mem;
+			rest.next=mem+BOOK_STRT*sysconf(_SC_PAGE_SIZE);//until end of sys memory
+			rest.free=1;
+			memcpy(mem,&new,sizeof(memHeader));
+			memcpy(mem+size,&rest,sizeof(memHeader));
+			sysinit=1;
+			return mem+sizeof(memHeader);
 		}
+		char* ptr=mem;
+		memHeader* bestPtr=NULL;
+		int best=INT_MAX;
+		while(ptr!=mem+BOOK_STRT*sysconf(_SC_PAGE_SIZE))
+		{
+			int sz;
+			if(((memHeader*)ptr)->free!=0)
+			{
+				sz=(((memHeader*)ptr)->next)-ptr;
+				if((abs(best-(signed)size)>abs(sz-(signed)size))&&(sz-(signed)size)>=0)
+				{
+					best=sz;
+					bestPtr=(memHeader*)ptr;
+				}
+			}
+			ptr=((memHeader*)ptr)->next;
+		}
+		if(bestPtr!=NULL)
+		{
+			bestPtr->free=0;
+			if((best-(signed)size)>sizeof(memHeader))
+			{
+				memHeader rest;
+				rest.free=1;
+				rest.verify=VER;
+				rest.prev=(char*)bestPtr;
+				rest.next=bestPtr->next;
+				bestPtr->next=((char*)bestPtr)+size;
+				memcpy(bestPtr->next,&rest,sizeof(memHeader));
+			}
+			return ((char*)bestPtr)+sizeof(memHeader);
+		}
+		return NULL; //big problem. Shouldn't happen though
 	}
-	return NULL;
 }
 
 void coalesce(char* ptr)
@@ -685,9 +567,8 @@ void mydeallocate(char* ptr,char* file,int line,int type)
 	printf("ver=%d\n",real->verify   );
 	printf("in dealloc %p - %p\n", real, real->next);
 	//printf(">%lu\n",((char*)real-mem)/sysconf(_SC_PAGE_SIZE));
-	if(1)//i don't think it matters if its sys mem or not
+	if(1)
 	{
-		//non-system request for free
 		if(real->verify!=VER)
 		{
 			printf("ERROR: Not pointing to void addr\n");
@@ -702,10 +583,6 @@ void mydeallocate(char* ptr,char* file,int line,int type)
 		real->free=1;
 		coalesce(ptr-sizeof(memHeader));
 	}
-	else
-	{
-	}
-	ptr=NULL;
 	if(mprotect(mem,MEM_PROT,PROT_NONE)==-1)
 	{
 		printf("ERROR: Memory protection failure\n");
@@ -716,10 +593,33 @@ void mydeallocate(char* ptr,char* file,int line,int type)
 
 int main()
 {
-	char* s=shalloc(100);
+	tester* t=(tester*)malloc(sizeof(tester));
 	printf("mem: %p...|%p-%p\n",mem,mem+MEM_STRT,mem+MEM_SIZE);
-	printf("SHALLOC REGION: %p - %p\n",mem+SHALLOC_STRT*sysconf(_SC_PAGE_SIZE),mem+SHALLOC_END*sysconf(_SC_PAGE_SIZE));
-	printf("s Given %p\n",s);
+	//printf("SHALLOC REGION: %p - %p\n",mem+SHALLOC_STRT*sysconf(_SC_PAGE_SIZE),mem+SHALLOC_END*sysconf(_SC_PAGE_SIZE));
+	printf("t Given %p\n",t);
+	t->a=5;
+	//////////////////
+	id=2;
+	tester* u=(tester*)malloc(sizeof(tester));
+	printf("u Given %p\n",u);
+	u->a=-2;
+	/////////////////
+	id=1;
+	mprotect(mem,MEM_SIZE,PROT_NONE);
+	printf("t again, t->a=%d\n",t->a);
+	char* t2=malloc(5000);
+	printf("t2 Given %p\n",t2);
+	for(int i=0;i<5000;i++)
+	{
+		t2[i]='q';
+	}
+	t2[4999]='\0';
+	printf("t2: %s\nt->a=%d\n",t2,t->a);
+	////////
+	id=2;
+	mprotect(mem,MEM_SIZE,PROT_NONE);
+	printf("u->a=%d\n",u->a);
+
 /*
 	char* t=myallocate(5000,__FILE__,__LINE__,6);
 	printf("SE:%p\n",mem+SHALLOC_END*sysconf(_SC_PAGE_SIZE));
