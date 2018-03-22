@@ -7,17 +7,17 @@
 #include <assert.h>
 #include <sys/mman.h>
 #include "mem.h"
-#include "my_pthread_t.h"
 
 #define malloc(x) myallocate(x,__FILE__,__LINE__,1);
 #define free(x) mydeallocate(x,__FILE__,__LINE__,1);
 #define VER 987
-#define MEM_SIZE 8003584
-#define MEM_STRT 2002944 //first page offset of non-system memory
-#define BOOK_STRT 489 //first page of non-sys memory
-#define BOOK_END 1951
-#define SHALLOC_STRT 1951
-#define SHALLOC_END 1955
+#define MEM_SIZE 8388608 //8MB = 2^23 (2048 pgs)
+#define MEM_STRT 2510848 //first page offset of non-system memory
+#define BOOK_STRT 613 //first page of non-sys memory (512 pages for stacks, 101 for ret vals, queue, etc) (0-612)
+#define BOOK_END 2044 //usr gets pgs 613-2043 (1430 pgs)
+#define SHALLOC_STRT 2044//shalloc is 4
+#define SHALLOC_END 2048
+#define MEM_PROT 8388608//8372224 //don't want to mprotect shalloc region
 
 typedef struct tester_
 {
@@ -28,9 +28,10 @@ typedef struct tester_
 
 char* mem;
 int meminit=0;
+int shinit=0;
 struct sigaction sa;
 int id=1; //equivalent to curr->tid
-memBook segments[1955]={0};//change 1953 to sysconf dervived value
+memBook segments[2048]={0};//change 1953 to sysconf dervived value
 //keeps track of which threads are in and which are not along with which segment they are present in.  -1: spot has not been used, -2: vacant but used
 //int threadList[1953][2] = { {-1} };
 
@@ -40,7 +41,7 @@ static void handler(int signum,siginfo_t* si,void* unused)
 {
 	char* addr=(char*)si->si_addr;
 	//assuming sys is not protected (since always loaded and will slow sched if protected)
-	if(addr>=mem&&addr<=mem+MEM_SIZE)//is end boundary inclusive?
+	if(addr>=mem&&addr<=mem+MEM_SIZE)
 	{
 		printf("(sh) my bad...\n");
 		fflush(stdout);
@@ -57,7 +58,7 @@ static void handler(int signum,siginfo_t* si,void* unused)
 		}
 		//printf("(sh) %d!=%d and %d!=%d\n",segments[loc].tid,id,segments[loc].pageNum,find);
 		int i;
-		if(mprotect(mem,MEM_SIZE,PROT_READ|PROT_WRITE)==-1)
+		if(mprotect(mem,MEM_PROT,PROT_READ|PROT_WRITE)==-1)
 		{
 			printf("ERROR: Memory protection failure\n");
 			exit(1);
@@ -75,7 +76,7 @@ static void handler(int signum,siginfo_t* si,void* unused)
 				memcpy(mem+i*sysconf(_SC_PAGE_SIZE),mem+loc*sysconf(_SC_PAGE_SIZE),sysconf(_SC_PAGE_SIZE));
 				segments[loc]=temp;
 				memcpy(mem+loc*sysconf(_SC_PAGE_SIZE),dataTemp,sysconf(_SC_PAGE_SIZE));
-				if(mprotect(mem,MEM_SIZE,PROT_NONE)==-1)
+				if(mprotect(mem,MEM_PROT,PROT_NONE)==-1)
 				{
 					printf("ERROR: Memory protection failure\n");
 					exit(1);
@@ -110,10 +111,14 @@ int abs(int a)
 	return a;
 }
 
-char* myallocate(size_t size,char* file,int line,int type)
+char* shalloc(size_t size)
 {
-	
 	size+=sizeof(memHeader);
+	if(size>4*sysconf(_SC_PAGE_SIZE))
+	{
+		//too big for shalloc region
+		return NULL;
+	}
 	if(meminit==0)
 	{
 		mem=(char*)memalign(sysconf(_SC_PAGE_SIZE),MEM_SIZE);
@@ -122,9 +127,10 @@ char* myallocate(size_t size,char* file,int line,int type)
 		sa.sa_flags=SA_SIGINFO;
 		sigemptyset(&sa.sa_mask);
 		sa.sa_sigaction=handler;
-		if(sigaction(SIGSEGV,&sa,NULL)==-1)
+			if(sigaction(SIGSEGV,&sa,NULL)==-1)
 		{
 			printf("Fatel error in signal handler setup\n");
+			fflush(stdout);
 			exit(EXIT_FAILURE);
 		}
 		int i;
@@ -137,9 +143,94 @@ char* myallocate(size_t size,char* file,int line,int type)
 		}
 		meminit=1;
 	}
-	if(mprotect(mem,MEM_SIZE,PROT_READ|PROT_WRITE)==-1)
+	if(shinit==0)
+	{
+		//make a first header (makes things better later)
+		memHeader new;
+		new.verify=VER;
+		new.prev=NULL;
+		new.next=mem+SHALLOC_STRT*sysconf(_SC_PAGE_SIZE)+size;
+		new.free=0;
+		if(size>=4*sysconf(_SC_PAGE_SIZE)-sizeof(memHeader))
+		{
+			memHeader rest;
+			rest.free=1;
+			rest.prev=mem+SHALLOC_STRT*sysconf(_SC_PAGE_SIZE);
+			rest.next=mem+SHALLOC_END*sysconf(_SC_PAGE_SIZE);
+			new.next=mem+SHALLOC_END*sysconf(_SC_PAGE_SIZE)+size;
+			memcpy(mem+SHALLOC_STRT*sysconf(_SC_PAGE_SIZE)+size,&rest,sizeof(memHeader));
+		}
+		memcpy(mem+SHALLOC_STRT*sysconf(_SC_PAGE_SIZE),&new,sizeof(memHeader));
+		return mem+SHALLOC_STRT*sysconf(_SC_PAGE_SIZE)+sizeof(memHeader);
+		shinit=1;
+	}
+	char* ptr=mem+SHALLOC_STRT*sysconf(_SC_PAGE_SIZE);
+	memHeader* bestPtr=NULL;
+	int best=sysconf(_SC_PAGE_SIZE)*4;
+	while(ptr!=mem+SHALLOC_END*sysconf(_SC_PAGE_SIZE))
+	{
+		int sz;
+		if(((memHeader*)ptr)->free!=0)
+		{
+			sz=(((memHeader*)ptr)->next)-ptr;	
+			if((abs(best-(signed)size)>abs(sz-(signed)size))&&(sz-(signed)size>=0))
+			{
+				best=sz;
+				bestPtr=(memHeader*)ptr;
+			}
+		}
+		ptr=((memHeader*)ptr)->next;
+	}
+	if(bestPtr!=NULL)
+	{
+		bestPtr->free=0;
+		if((best-(signed)size)>sizeof(memHeader))
+		{
+			memHeader rest;
+			rest.free=1;
+			rest.prev=(char*)bestPtr;
+			rest.next=bestPtr->next;
+			rest.verify=VER;
+			bestPtr->next=(char*)bestPtr+size;
+			memcpy(bestPtr+size,&rest,sizeof(memHeader));
+		}
+		return (char*)bestPtr+sizeof(memHeader);
+	}
+	return NULL;
+}
+
+char* myallocate(size_t size,char* file,int line,int type)
+{
+	
+	size+=sizeof(memHeader);
+	if(meminit==0)
+	{
+		mem=(char*)memalign(sysconf(_SC_PAGE_SIZE),MEM_SIZE);
+		printf("mem:%p - %p\n",mem,mem+MEM_SIZE);
+		printf("header size:%lu,0x%X\n",sizeof(memHeader),(int)sizeof(memHeader));	
+		sa.sa_flags=SA_SIGINFO;
+		sigemptyset(&sa.sa_mask);
+		sa.sa_sigaction=handler;
+			if(sigaction(SIGSEGV,&sa,NULL)==-1)
+		{
+			printf("Fatel error in signal handler setup\n");
+			fflush(stdout);
+			exit(EXIT_FAILURE);
+		}
+		int i;
+		for(i=0;i<SHALLOC_END;i++)
+		{
+			segments[i].tid=-1;
+			segments[i].pageNum=-1;
+			segments[i].first_in_chain=-1; 
+			segments[i].numPages=0;
+		}
+		meminit=1;
+	}
+	if(mprotect(mem,MEM_PROT,PROT_READ|PROT_WRITE)==-1)
 	{
 		printf("ERROR: Memory protection failure\n");
+		fflush(stdout);
 		exit(EXIT_FAILURE);
 	}
 	if(type!=0)
@@ -148,7 +239,6 @@ char* myallocate(size_t size,char* file,int line,int type)
 		{
 			double num=(double)size/sysconf(_SC_PAGE_SIZE);
 			//printf("raw num=%f\n",num);
-			int tempSize=(signed)size;
 			if(num-(int)num!=0)
 			{
 				num++;
@@ -176,7 +266,7 @@ char* myallocate(size_t size,char* file,int line,int type)
 			if(pgCount!=pgReq)
 			{
 				//not enough free pages
-				if(mprotect(mem,MEM_SIZE,PROT_NONE)==-1)
+				if(mprotect(mem,MEM_PROT,PROT_NONE)==-1)
 				{
 					printf("ERROR: Memory protection failure\n");
 					exit(1);
@@ -205,7 +295,6 @@ char* myallocate(size_t size,char* file,int line,int type)
 				//set each of the memBook entries for the new pages
 				segments[pgList[i]].used=1;
 				segments[pgList[i]].tid=id;//change to curr->id
-				segments[pgList[i]].pageNum=pgCount-i; //how many pages are after it for this chunk
 				segments[pgList[i]].pageNum=has+i; //where each page will belong when loaded properly
 				//printf("pgList[i]=%d\n",pgList[i]);
 				//printf("pgList[i].numPages=%d\n",segments[pgList[i]].numPages);
@@ -257,7 +346,7 @@ char* myallocate(size_t size,char* file,int line,int type)
 				segments[BOOK_STRT+has+i]=temp;
 				memcpy(mem+(BOOK_STRT+has+i)*sysconf(_SC_PAGE_SIZE),dataTemp,sysconf(_SC_PAGE_SIZE));
 			}
-			if(mprotect(mem,MEM_SIZE,PROT_NONE)==-1)
+			if(mprotect(mem,MEM_PROT,PROT_NONE)==-1)
 			{
 				printf("ERROR: Memory protection failure\n");
 				exit(1);
@@ -294,7 +383,7 @@ char* myallocate(size_t size,char* file,int line,int type)
 					//printf("offset:%d\n",offset);
 					memHeader* toSet=NULL; //current loc in mem so data can be set with this pointer
 					memHeader* bestFit=NULL; //bestFit as if mem was loaded in correct page place
-					memHeader* curr=(memHeader*)ptr; //points to curr loc in mem, NOT WHERE THE PAGE THINKS IT IS
+					memHeader* curr=(memHeader*)ptr;//points to curr loc in mem, NOT WHERE THE PAGE THINKS IT IS
 					//printf("pgNUM=%d\n",segments[a].pageNum);
 					//printf("%p!=%p\n",was,mem+(segments[a].pageNum+1+BOOK_STRT)*sysconf(_SC_PAGE_SIZE));
 					while(was!=mem+(segments[a].pageNum+1+BOOK_STRT)*sysconf(_SC_PAGE_SIZE))
@@ -361,7 +450,7 @@ char* myallocate(size_t size,char* file,int line,int type)
 							segments[loc]=temp;
 							memcpy(mem+loc*sysconf(_SC_PAGE_SIZE),tempData,sysconf(_SC_PAGE_SIZE));
 						}
-						if(mprotect(mem,MEM_SIZE,PROT_NONE)==-1)
+						if(mprotect(mem,MEM_PROT,PROT_NONE)==-1)
 						{
 							printf("ERROR: Memory protection problem\n");
 							exit(1);
@@ -422,7 +511,7 @@ char* myallocate(size_t size,char* file,int line,int type)
 					memcpy(mem+(BOOK_STRT+has)*sysconf(_SC_PAGE_SIZE),tempData,sysconf(_SC_PAGE_SIZE));
 
 				}
-				if(mprotect(mem,MEM_SIZE,PROT_NONE)==-1)
+				if(mprotect(mem,MEM_PROT,PROT_NONE)==-1)
 				{
 					printf("ERROR: Memory protection failure\n");
 					exit(1);
@@ -430,18 +519,79 @@ char* myallocate(size_t size,char* file,int line,int type)
 				return mem+(BOOK_STRT+has)*sysconf(_SC_PAGE_SIZE)+sizeof(memHeader);
 			}
 		}
-		if(mprotect(mem,MEM_SIZE,PROT_NONE)==-1)
+		if(mprotect(mem,MEM_PROT,PROT_NONE)==-1)
 		{
 			printf("ERROR: Memory protection failure\n");
 			exit(1);
 		}
 		return NULL;
 	}
-	else
+	else //sys req for mem
 	{
-		//system wants mem
-		//os mem should go in front of mem array
-		//~25-50% of array and should never go in swap
+		if(size>sysconf(_SC_PAGE_SIZE))
+		{
+			double num=(double)size/sysconf(_SC_PAGE_SIZE);
+			if(num-(int)num!=0)
+			{
+				num++;
+			}
+			int pgReq=(int)num;
+			int pgList[pgReq];
+			int pgCount=0;
+			int i;
+			for(i=0;i<BOOK_STRT;i++)
+			{
+				if(segments[i].used==0)
+				{
+					pgList[pgCount]=i;
+					pgCount++;
+				}
+				if(pgCount==pgReq)
+				{
+					break;
+				}
+			}
+			if(pgCount!=pgReq)
+			{
+				if(mprotect(mem,MEM_PROT,PROT_NONE)==-1)
+				{
+					printf("ERROR: Memory protection failure\n");
+					exit(1);
+				}
+				return NULL;
+			}
+			int has=0;
+			for(i=0;i<BOOK_STRT;i++)
+			{
+				if(segments[i].used==1)
+				{
+					has++;
+				}
+			}
+			for(i=0;i<pgCount;i++)
+			{
+				segments[pgList[i]].tid=0;
+				segments[pgList[i]].used=1;
+				segments[pgList[i]].pageNum=has+i;
+				if(i==0)
+				{
+					segments[pgList[i]].first_in_chain=1;
+				}
+				else
+				{
+					segments[pgList[i]].first_in_chain=2;
+				}
+			}
+			segments[pgList[0]].numPages=pgReq;
+			//header stuff
+			memHeader new;
+			new.id=0;
+			new.free=0;
+			new.verify=VER;
+			new.prev=NULL;
+			new.next=mem+(has+pgReq)*sysconf(_SC_PAGE_SIZE);
+			
+		}
 	}
 	return NULL;
 }
@@ -556,7 +706,7 @@ void mydeallocate(char* ptr,char* file,int line,int type)
 	{
 	}
 	ptr=NULL;
-	if(mprotect(mem,MEM_SIZE,PROT_NONE)==-1)
+	if(mprotect(mem,MEM_PROT,PROT_NONE)==-1)
 	{
 		printf("ERROR: Memory protection failure\n");
 		exit(1);
@@ -566,9 +716,13 @@ void mydeallocate(char* ptr,char* file,int line,int type)
 
 int main()
 {
-
-	char* t=myallocate(5000,__FILE__,__LINE__,6);
+	char* s=shalloc(100);
 	printf("mem: %p...|%p-%p\n",mem,mem+MEM_STRT,mem+MEM_SIZE);
+	printf("SHALLOC REGION: %p - %p\n",mem+SHALLOC_STRT*sysconf(_SC_PAGE_SIZE),mem+SHALLOC_END*sysconf(_SC_PAGE_SIZE));
+	printf("s Given %p\n",s);
+/*
+	char* t=myallocate(5000,__FILE__,__LINE__,6);
+	printf("SE:%p\n",mem+SHALLOC_END*sysconf(_SC_PAGE_SIZE));
 //	printf("sizeof(tester)=%lu\n",sizeof(tester));
 //	printf("+%p\n",((memHeader*)((memHeader*)((char*)t-sizeof(memHeader)))->next)->next);
 	printf("t Given ptr=%p\n",t);
@@ -582,5 +736,6 @@ int main()
 	//mydeallocate(t,__FILE__,__LINE__,6);
 	char* hey=myallocate(sizeof(char),__FILE__,__LINE__,6);
 	printf("hey given ptr=%p\n",hey);
+*/
 	return 0;
 }
