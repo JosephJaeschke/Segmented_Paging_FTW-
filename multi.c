@@ -574,7 +574,12 @@ void coalesce(char* ptr,int type,int has)
 	else
 	{
 		//usr
-		char* pgEnd=mem+has*sysconf(_SC_PAGE_SIZE);
+		char* pgEnd=mem+(BOOK_STRT+has)*sysconf(_SC_PAGE_SIZE);
+		printf("pgEnd: %p,has=%d\n",pgEnd,has);
+		if(ptr==pgEnd)
+		{
+			return;
+		}
 		if(prv==NULL&&(char*)nxt!=pgEnd)//on left edge
 		{
 			printf("-b and %p!=%p\n",nxt,pgEnd);
@@ -638,7 +643,7 @@ void mydeallocate(char* ptr,char* file,int line,int type)
 		int i;
 		for(i=BOOK_STRT;i<BOOK_END;i++)
 		{
-			if(segments[i].tid==id&&segments[i].used==1)//change to curr->id
+			if(segments[i].tid==id&&segments[i].used!=0)//change to curr->id
 			{
 				has++;
 			}
