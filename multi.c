@@ -242,7 +242,7 @@ char* myallocate(size_t size,char* file,int line,int type)
 		int i,has=0;
 		for(i=BOOK_STRT;i<BOOK_END;i++)
 		{
-			if(segments[i].tid==id&&segments[i].used==1) //change to curr->tid
+			if(segments[i].tid==id&&segments[i].used!=0) //change to curr->tid
 			{
 				has++;
 			}
@@ -292,6 +292,7 @@ char* myallocate(size_t size,char* file,int line,int type)
 		}
 		else //we already have pages
 		{
+			printf("--0\n");
 			//see if request fits in already owned region
 			char* ptr=mem+BOOK_STRT*sysconf(_SC_PAGE_SIZE);
 			char* lastPtr=NULL;
@@ -333,9 +334,11 @@ char* myallocate(size_t size,char* file,int line,int type)
 			//need to stick request at end
 			if(((memHeader*)lastPtr)->free!=0)
 			{
+				printf("--1\n");
 				//stick request on end
 				int roomLeft=(((memHeader*)lastPtr)->next)-lastPtr-sizeof(memHeader); //!
 				double newNum=(((signed)size)-(double)roomLeft)/sysconf(_SC_PAGE_SIZE); //!
+				printf("nn=%f\n",newNum);
 				if(newNum-(int)newNum!=0)
 				{
 					newNum++;
@@ -367,15 +370,19 @@ char* myallocate(size_t size,char* file,int line,int type)
 				((memHeader*)lastPtr)->free=0;
 				((memHeader*)lastPtr)->next=lastPtr+size;
 				memHeader rest;
+				((memHeader*)lastPtr)->free=0;
+				((memHeader*)lastPtr)->next=((char*)lastPtr)+size;
 				rest.free=1;
 				rest.prev=lastPtr;
-				rest.next=mem+(BOOK_STRT+has+pgReq)*sysconf(_SC_PAGE_SIZE); //!
+				printf("pR=%d\n",newReq);
+				rest.next=mem+(BOOK_STRT+has+newReq)*sysconf(_SC_PAGE_SIZE); //!
 				rest.verify=VER;
 				memcpy(lastPtr+size,&rest,sizeof(memHeader));
 				return lastPtr+sizeof(memHeader);
 			}
 			else
 			{
+				printf("--2\n");
 				//stick request on end, but not including last chunk
 				//last pointer was not free and ended right on page boundary
 				//all last ptrs will have their next point to page boundary
@@ -651,6 +658,7 @@ void mydeallocate(char* ptr,char* file,int line,int type)
 
 	}
 	printf("in dealloc %p - %p\n", real, real->next);
+	printf("next next = %p\n",((memHeader*)(real->next))->next);
 	//printf(">%lu\n",((char*)real-mem)/sysconf(_SC_PAGE_SIZE));
 	if(real->verify!=VER)
 	{
@@ -688,19 +696,26 @@ int main()
 	id=1;
 	mprotect(mem,MEM_SIZE,PROT_NONE);
 	printf("t again, t->a=%d\n",t->a);
-	char* t2=malloc(5000);
+	char* t2=malloc(8192);
 	printf("t2 Given %p\n",t2);
-	for(int i=0;i<5000;i++)
+	for(int i=0;i<8192;i++)
 	{
 		t2[i]='q';
 	}
-	t2[4999]='\0';
-	printf("t2: %s\nt->a=%d\n",t2,t->a);
+	t2[8191]='\0';
+//	printf("t2: %s\nt->a=%d\n",t2,t->a);
 	////////
+	/*
 	id=2;
 	mprotect(mem,MEM_SIZE,PROT_NONE);
 	printf("u->a=%d\n",u->a);
 	free((char*)u);
+	u=(tester*)malloc(sizeof(tester));
+	printf("u Given %p\n",u);
+	/////// */
+	id=1;
+	mprotect(mem,MEM_SIZE,PROT_NONE);
+	free((char*)t2);
 
 /*
 	char* t=myallocate(5000,__FILE__,__LINE__,6);
