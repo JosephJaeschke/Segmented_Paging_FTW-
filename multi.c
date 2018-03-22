@@ -45,7 +45,7 @@ static void handler(int signum,siginfo_t* si,void* unused)
 	//assuming sys is not protected (since always loaded and will slow sched if protected)
 	if(addr>=mem&&addr<=mem+MEM_SIZE)
 	{
-		printf("(sh) my bad...\n");
+		//printf("(sh) my bad...\n");
 		fflush(stdout);
 		int loc=(addr-mem)/sysconf(_SC_PAGE_SIZE);//page number of fault	
 		int find=loc-BOOK_STRT;//which of its pages thread wanted
@@ -222,7 +222,6 @@ char* myallocate(size_t size,char* file,int line,int type)
 		{
 			segments[i].tid=-1;
 			segments[i].pageNum=-1;
-			segments[i].first_in_chain=-1; 
 		}
 		meminit=1;
 	}
@@ -292,7 +291,8 @@ char* myallocate(size_t size,char* file,int line,int type)
 		}
 		else //we already have pages
 		{
-			printf("--0\n");
+			//printf("--0\n");
+
 			//see if request fits in already owned region
 			char* ptr=mem+BOOK_STRT*sysconf(_SC_PAGE_SIZE);
 			char* lastPtr=NULL;
@@ -334,11 +334,11 @@ char* myallocate(size_t size,char* file,int line,int type)
 			//need to stick request at end
 			if(((memHeader*)lastPtr)->free!=0)
 			{
-				printf("--1\n");
+				//printf("--1\n");
 				//stick request on end
 				int roomLeft=(((memHeader*)lastPtr)->next)-lastPtr-sizeof(memHeader); //!
 				double newNum=(((signed)size)-(double)roomLeft)/sysconf(_SC_PAGE_SIZE); //!
-				printf("nn=%f\n",newNum);
+				//printf("nn=%f\n",newNum);
 				if(newNum-(int)newNum!=0)
 				{
 					newNum++;
@@ -374,7 +374,7 @@ char* myallocate(size_t size,char* file,int line,int type)
 				((memHeader*)lastPtr)->next=((char*)lastPtr)+size;
 				rest.free=1;
 				rest.prev=lastPtr;
-				printf("pR=%d\n",newReq);
+				//printf("pR=%d\n",newReq);
 				rest.next=mem+(BOOK_STRT+has+newReq)*sysconf(_SC_PAGE_SIZE); //!
 				rest.verify=VER;
 				memcpy(lastPtr+size,&rest,sizeof(memHeader));
@@ -382,7 +382,7 @@ char* myallocate(size_t size,char* file,int line,int type)
 			}
 			else
 			{
-				printf("--2\n");
+				//printf("--2\n");
 				//stick request on end, but not including last chunk
 				//last pointer was not free and ended right on page boundary
 				//all last ptrs will have their next point to page boundary
@@ -716,6 +716,10 @@ int main()
 	id=1;
 	mprotect(mem,MEM_SIZE,PROT_NONE);
 	free((char*)t2);
+	free((char*)t);
+	t=(tester*)malloc(sizeof(tester));
+	printf("t Given %p\n",t);
+	printf("*** RAN TO COMPLETION ***\n");
 
 /*
 	char* t=myallocate(5000,__FILE__,__LINE__,6);
