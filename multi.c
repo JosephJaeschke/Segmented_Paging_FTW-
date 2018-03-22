@@ -478,7 +478,7 @@ char* myallocate(size_t size,char* file,int line,int type)
 	}
 }
 
-void coalesce(char* ptr)
+void coalesce(char* ptr,int type)
 {
 	printf("-coal(%p)\n",ptr);
 	int segIndex=(ptr-mem)/sysconf(_SC_PAGE_SIZE);
@@ -521,7 +521,7 @@ void coalesce(char* ptr)
 			//recuses infinently here on the deallocate of a from man
 	//		printf("f\n");
 			((memHeader*)ptr)->next=nxt->next;
-			coalesce(ptr);
+			coalesce(ptr,type);
 		}
 		return;
 			
@@ -533,7 +533,7 @@ void coalesce(char* ptr)
 		{
 			prv->next=((memHeader*)ptr)->next;
 			ptr=(char*)prv;
-			coalesce(ptr);
+			coalesce(ptr,type);
 		}
 		return; 
 	}
@@ -554,7 +554,7 @@ void coalesce(char* ptr)
 				nxt->prev=((memHeader*)ptr)->prev;	
 				ptr=(char*)prv;
 			}
-			coalesce(ptr);
+			coalesce(ptr,type);
 		}
 		return;
 	}
@@ -564,7 +564,7 @@ void mydeallocate(char* ptr,char* file,int line,int type)
 {
 	printf("-dealoc\n");
 	memHeader* real=((memHeader*)(ptr-sizeof(memHeader)));
-	printf("ver=%d\n",real->verify   );
+	//printf("ver=%d\n",real->verify);
 	printf("in dealloc %p - %p\n", real, real->next);
 	//printf(">%lu\n",((char*)real-mem)/sysconf(_SC_PAGE_SIZE));
 	if(1)
@@ -576,12 +576,11 @@ void mydeallocate(char* ptr,char* file,int line,int type)
 		}
 		if(segments[((char*)real-mem)/sysconf(_SC_PAGE_SIZE)].tid!=id)//will be changed to look at memBook
 		{
-	//		printf("%d=%d 1\n",((memHeader*)ptr)->id,type);
 			printf("ERROR: You do not own this memory\n");
 			return;
 		}
 		real->free=1;
-		coalesce(ptr-sizeof(memHeader));
+		coalesce(ptr-sizeof(memHeader),type);
 	}
 	if(mprotect(mem,MEM_PROT,PROT_NONE)==-1)
 	{
