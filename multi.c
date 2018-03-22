@@ -140,8 +140,6 @@ char* shalloc(size_t size)
 		{
 			segments[i].tid=-1;
 			segments[i].pageNum=-1;
-			segments[i].first_in_chain=-1; 
-			segments[i].numPages=0;
 		}
 		meminit=1;
 	}
@@ -244,7 +242,7 @@ char* myallocate(size_t size,char* file,int line,int type)
 		int i,has=0;
 		for(i=BOOK_STRT;i<BOOK_END;i++)
 		{
-			if(segments[i].tid==id) //change to curr->tid
+			if(segments[i].tid==id&&segments[i].used==1) //change to curr->tid
 			{
 				has++;
 			}
@@ -478,85 +476,148 @@ char* myallocate(size_t size,char* file,int line,int type)
 	}
 }
 
-void coalesce(char* ptr,int type)
+void coalesce(char* ptr,int type,int has)
 {
 	printf("-coal(%p)\n",ptr);
-	int segIndex=(ptr-mem)/sysconf(_SC_PAGE_SIZE);
-	char* pgStart=mem+segIndex*sysconf(_SC_PAGE_SIZE);
-	char* pgEnd=mem+(segIndex+1)*sysconf(_SC_PAGE_SIZE);
-	if(segments[segIndex].first_in_chain!=0)
-	{
-		printf("sI=%d\n",segIndex);
-		int i;
-		int tempPages=segments[segIndex].numPages;
-		printf("tP=%d\n",tempPages);
-		for(i=0;i<tempPages;i++)
-		{
-			segments[segIndex+i].used=0;
-			segments[segIndex+i].tid=-1;
-			segments[segIndex+i].pageNum=-1;
-			segments[segIndex+i].first_in_chain=0;
-			segments[segIndex+i].numPages=0;
-		}
-		return;
-
-	}
 	memHeader* nxt=(memHeader*)((memHeader*)ptr)->next;
 	memHeader* prv=(memHeader*)((memHeader*)ptr)->prev;
-	if(prv==NULL&&(char*)nxt==pgEnd)
+	if(type==2)
 	{
-		//empty page
-		//mark it as empty
-		printf("-a\n");
-		segments[segIndex].used=0;
-		segments[segIndex].tid=-1;
-		segments[segIndex].pageNum=-1;
-		return;
-	}
-	else if(prv==NULL&&(char*)nxt!=pgEnd)//on left boundary of page
-	{
-		printf("-b and %p!=%p\n",nxt,pgEnd);
-		if(nxt->free!=0)
+		//shalloc
+		if(prv==NULL&&(char*)nxt!=mem+SHALLOC_END*sysconf(_SC_PAGE_SIZE))//on left edge
 		{
-			//recuses infinently here on the deallocate of a from man
-	//		printf("f\n");
-			((memHeader*)ptr)->next=nxt->next;
-			coalesce(ptr,type);
+			printf("-b\n");
+			if(nxt->free!=0)
+			{
+				((memHeader*)ptr)->next=nxt->next;
+				coalesce(ptr,type,has);
+			}
+			return;
 		}
-		return;
-			
-	}
-	else if(prv!=NULL&&(char*)nxt==pgEnd)//on right boundary of page
-	{
-		printf("-c\n");
-		if(prv->free!=0)
+		else if((char*)nxt==mem+SHALLOC_END*sysconf(_SC_PAGE_SIZE)&&prv!=NULL)//on right edge
 		{
-			prv->next=((memHeader*)ptr)->next;
-			ptr=(char*)prv;
-			coalesce(ptr,type);
+			printf("-c\n");
+			if(prv->free!=0)
+			{
+				prv->next=((memHeader*)ptr)->next;
+				ptr=(char*)prv;
+				coalesce(ptr,type,has);
+			}
+			return; 
 		}
-		return; 
+		else if(prv!=NULL&&(char*)nxt!=mem+SHALLOC_END*sysconf(_SC_PAGE_SIZE))//in middle
+		{
+			printf("-d\n");
+			if(nxt->free!=0||prv->free!=0)
+			{
+				if(nxt->free!=0)
+				{
+					printf("d1\n");
+					((memHeader*)ptr)->next=nxt->next;
+				}
+				if(prv->free!=0)
+				{
+					printf("d2\n");
+					prv->next=((memHeader*)ptr)->next;
+					nxt->prev=((memHeader*)ptr)->prev;	
+					ptr=(char*)prv;
+				}
+				coalesce(ptr,type,has);
+			}
+			return;
+		}
+
 	}
-	else if(prv!=NULL&&(char*)nxt!=pgEnd)//somewhere in the page
+	else if(type==0)
 	{
-		printf("-d\n");
-		if(nxt->free!=0||prv->free!=0)
+		//sys
+		if(prv==NULL&&(char*)nxt!=mem+BOOK_STRT*sysconf(_SC_PAGE_SIZE))//on left edge
 		{
 			if(nxt->free!=0)
 			{
-				printf("d1\n");
 				((memHeader*)ptr)->next=nxt->next;
+				coalesce(ptr,type,has);
 			}
+			return;
+		}
+		else if((char*)nxt==mem+BOOK_STRT*sysconf(_SC_PAGE_SIZE)&&prv!=NULL)//on right edge
+		{
 			if(prv->free!=0)
 			{
-				printf("d2\n");
 				prv->next=((memHeader*)ptr)->next;
-				nxt->prev=((memHeader*)ptr)->prev;	
 				ptr=(char*)prv;
+				coalesce(ptr,type,has);
 			}
-			coalesce(ptr,type);
+			return; 
 		}
-		return;
+		else if(prv!=NULL&&(char*)nxt!=mem+BOOK_STRT*sysconf(_SC_PAGE_SIZE))//in middle
+		{
+			if(nxt->free!=0||prv->free!=0)
+			{
+				if(nxt->free!=0)
+				{
+					printf("d1\n");
+					((memHeader*)ptr)->next=nxt->next;
+				}
+				if(prv->free!=0)
+				{
+					printf("d2\n");
+					prv->next=((memHeader*)ptr)->next;
+					nxt->prev=((memHeader*)ptr)->prev;	
+					ptr=(char*)prv;
+				}
+				coalesce(ptr,type,has);
+			}
+			return;
+		}
+	}
+	else
+	{
+		//usr
+		char* pgEnd=mem+has*sysconf(_SC_PAGE_SIZE);
+		if(prv==NULL&&(char*)nxt!=pgEnd)//on left edge
+		{
+			printf("-b and %p!=%p\n",nxt,pgEnd);
+			if(nxt->free!=0)
+			{
+				((memHeader*)ptr)->next=nxt->next;
+				coalesce(ptr,type,has);
+			}
+			return;
+			
+		}
+		else if(prv!=NULL&&(char*)nxt==pgEnd)//on right edge
+		{
+			printf("-c\n");
+			if(prv->free!=0)
+			{
+				prv->next=((memHeader*)ptr)->next;
+				ptr=(char*)prv;
+				coalesce(ptr,type,has);
+			}
+			return; 
+		}
+		else if(prv!=NULL&&(char*)nxt!=pgEnd)//in middle
+		{
+			printf("-d\n");
+			if(nxt->free!=0||prv->free!=0)
+			{
+				if(nxt->free!=0)
+				{
+					printf("d1\n");
+					((memHeader*)ptr)->next=nxt->next;
+				}
+				if(prv->free!=0)
+				{
+					printf("d2\n");
+					prv->next=((memHeader*)ptr)->next;
+					nxt->prev=((memHeader*)ptr)->prev;	
+					ptr=(char*)prv;
+				}
+				coalesce(ptr,type,has);
+			}
+			return;
+		}
 	}
 }
 
@@ -565,23 +626,39 @@ void mydeallocate(char* ptr,char* file,int line,int type)
 	printf("-dealoc\n");
 	memHeader* real=((memHeader*)(ptr-sizeof(memHeader)));
 	//printf("ver=%d\n",real->verify);
+	char* check=(char*)real;
+	if((signed)(check-(mem+(SHALLOC_STRT)*sysconf(_SC_PAGE_SIZE)))>=0)
+	{
+		//freeing from shalloc region
+		type++;
+	}
+	int has=0;
+	if(type==1)
+	{
+		int i;
+		for(i=BOOK_STRT;i<BOOK_END;i++)
+		{
+			if(segments[i].tid==id&&segments[i].used==1)//change to curr->id
+			{
+				has++;
+			}
+		}
+
+	}
 	printf("in dealloc %p - %p\n", real, real->next);
 	//printf(">%lu\n",((char*)real-mem)/sysconf(_SC_PAGE_SIZE));
-	if(1)
+	if(real->verify!=VER)
 	{
-		if(real->verify!=VER)
-		{
-			printf("ERROR: Not pointing to void addr\n");
-			return;
-		}
-		if(segments[((char*)real-mem)/sysconf(_SC_PAGE_SIZE)].tid!=id)//will be changed to look at memBook
-		{
-			printf("ERROR: You do not own this memory\n");
-			return;
-		}
-		real->free=1;
-		coalesce(ptr-sizeof(memHeader),type);
+		printf("ERROR: Not pointing to void addr\n");
+		return;
 	}
+	if(segments[((char*)real-mem)/sysconf(_SC_PAGE_SIZE)].tid!=id)//will be changed to look at memBook
+	{
+		printf("ERROR: You do not own this memory\n");
+		return;
+	}
+	real->free=1;
+	coalesce(ptr-sizeof(memHeader),type,has);
 	if(mprotect(mem,MEM_PROT,PROT_NONE)==-1)
 	{
 		printf("ERROR: Memory protection failure\n");
@@ -618,6 +695,7 @@ int main()
 	id=2;
 	mprotect(mem,MEM_SIZE,PROT_NONE);
 	printf("u->a=%d\n",u->a);
+	free((char*)u);
 
 /*
 	char* t=myallocate(5000,__FILE__,__LINE__,6);
