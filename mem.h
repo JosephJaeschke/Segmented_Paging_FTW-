@@ -17,4 +17,16 @@ typedef struct memBook_
 	int used:1;
 } memBook;
 
+//static void handler (int signum, siginfo_t* si, void* unused);
+
+int abs (int a);
+
+char* shalloc (size_t size);
+
+char* myallocate (size_t size, char* file, int line, int type);
+
+void coalesce (char* ptr, int type, int has);
+
+void mydeallocate (char* ptr, char* file, int line, int type);
+
 #endif /* _MEM_H_ */

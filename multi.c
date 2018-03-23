@@ -698,7 +698,8 @@ int main()
 	printf("t again, t->a=%d\n",t->a);
 	char* t2=malloc(8192);
 	printf("t2 Given %p\n",t2);
-	for(int i=0;i<8192;i++)
+	int i;
+	for(i=0;i<8192;i++)
 	{
 		t2[i]='q';
 	}

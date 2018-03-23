@@ -12,6 +12,7 @@
 #include <signal.h>
 #include <sys/time.h>
 #include <unistd.h>
+#include "mem.h"
 
 #define MAX_STACK 65536 //my TA told someone that 32k is a good number
 #define MAX_THREAD 32 //TA said a power of 2 and referenced 32
@@ -24,6 +25,8 @@
 #define pthread_join my_pthread_join
 #define pthread_exit my_pthread_exit
 #define pthread_yield my_pthread_yield
+
+#define pthread_mutex_t my_pthread_mutex_t
 #define pthread_mutex_init my_pthread_mutex_init
 #define pthread_mutex_lock my_pthread_mutex_lock
 #define pthread_mutex_unlock my_pthread_mutex_unlock
@@ -96,7 +99,7 @@ void wrapper(int f1,int f2,int a1,int a2)
 //	fflush(stdout);
 	if(curr->state!=4)
 	{
-		curr->retVal=malloc(1);
+		curr->retVal=(void*)myallocate(1, __FILE__, __LINE__, 0);
 		my_pthread_exit(curr->retVal);
 	}
 	return;
@@ -224,7 +227,7 @@ void maintenance()
 {
 	//give all threads priority 0 to prevent starvation
 	int i;
-	tcb* new=malloc(sizeof(tcb));
+	tcb* new=(tcb*)myallocate(sizeof(tcb), __FILE__, __LINE__, 0);
 	tcb* head=new;
 	tcb* tmp;
 	for(i=0;i<PRIORITY_LEVELS;i++)
@@ -245,7 +248,7 @@ void maintenance()
 	}
 	queue[0]=head->nxt;
 	new=head;
-	free(new);
+	mydeallocate((char*)new, __FILE__, __LINE__, 0);
 	return;
 }
 
@@ -264,8 +267,8 @@ int my_pthread_create(my_pthread_t* thread, pthread_attr_t* attr, void*(*functio
 	{
 		//init stuff
 		//set up main thread/context
-		queue=malloc(PRIORITY_LEVELS*sizeof(tcb));
-		terminating=malloc(sizeof(tcb));
+		queue=(tcb**)myallocate((PRIORITY_LEVELS*sizeof(tcb)), __FILE__, __LINE__, 0);
+		terminating=(tcb*)myallocate(sizeof(tcb), __FILE__, __LINE__, 0);
 		int i=0;
 		for(i;i<PRIORITY_LEVELS;i++)
 		{
@@ -276,7 +279,7 @@ int my_pthread_create(my_pthread_t* thread, pthread_attr_t* attr, void*(*functio
 			printf("ERROR: Failed to get context for main\n");
 			return 1;
 		}
-		tcb* maint=malloc(sizeof(tcb));
+		tcb* maint=(tcb*)myallocate(sizeof(tcb), __FILE__, __LINE__, 0);
 		maint->state=0;
 		maint->tid=idCounter++;
 		maint->context=ctx_main;
@@ -303,7 +306,7 @@ int my_pthread_create(my_pthread_t* thread, pthread_attr_t* attr, void*(*functio
 			return 1;
 		}
 		ctx_sched.uc_link=0;
-		ctx_sched.uc_stack.ss_sp=malloc(MAX_STACK);
+		ctx_sched.uc_stack.ss_sp=(void*)myallocate(MAX_STACK, __FILE__, __LINE__, 0);
 		ctx_sched.uc_stack.ss_size=MAX_STACK;
 		/*
 		tcb* schedt=malloc(sizeof(tcb*));
@@ -340,9 +343,9 @@ int my_pthread_create(my_pthread_t* thread, pthread_attr_t* attr, void*(*functio
 		return 1;
 	}
 	ctx_func.uc_link=&curr->context;  //i think ************************
-	ctx_func.uc_stack.ss_sp=malloc(MAX_STACK);
+	ctx_func.uc_stack.ss_sp=(void*)myallocate(MAX_STACK, __FILE__, __LINE__, 0);
 	ctx_func.uc_stack.ss_size=MAX_STACK;
-	tcb* t=malloc(sizeof(tcb));
+	tcb* t=(tcb*)myallocate(sizeof(tcb), __FILE__, __LINE__, 0);
 	t->state=0;
 	t->tid=idCounter++;
 	*thread=t->tid;
@@ -456,7 +459,7 @@ int my_pthread_join(my_pthread_t thread, void **value_ptr)
 		}
 		else if(terminating->tid==thread)//thread is first in list
 		{
-			tcb* ptr=malloc(sizeof(tcb));
+			tcb* ptr=(tcb*)myallocate(sizeof(tcb), __FILE__, __LINE__, 0);
 			ptr=terminating;
 			//dereference ** to set equal to return thing
 			//to deref **, cast to double (sizeof(double)=sizeof(pointer))
@@ -469,9 +472,9 @@ int my_pthread_join(my_pthread_t thread, void **value_ptr)
 			terminating=terminating->nxt;
 			if(ptr->context.uc_stack.ss_sp!=NULL)
 			{
-				free(ptr->context.uc_stack.ss_sp);
+				mydeallocate((char*)(ptr->context.uc_stack.ss_sp), __FILE__, __LINE__, 0);
 			}
-			free(ptr);
+			mydeallocate((char*)ptr, __FILE__, __LINE__, 0);
 			activeThreads--;
 			curr->state=1;
 			return 0;
@@ -491,8 +494,8 @@ int my_pthread_join(my_pthread_t thread, void **value_ptr)
 						double** temp=(double**)value_ptr;
 						*temp=ptr->retVal;
 					}
-					free(ptr->context.uc_stack.ss_sp);
-					free(ptr);
+					mydeallocate((char*)(ptr->context.uc_stack.ss_sp), __FILE__, __LINE__, 0);
+					mydeallocate((char*)ptr, __FILE__, __LINE__, 0);
 					activeThreads--;
 					return 0;
 				}
