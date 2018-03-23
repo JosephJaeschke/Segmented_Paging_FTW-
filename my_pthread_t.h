@@ -32,6 +32,7 @@
 #include <ucontext.h>
 #include <signal.h>
 
+//typedef uint my_pthread_t;
 typedef my_pthread_t unit;
 
 typedef struct threadControlBlock 
@@ -78,6 +79,8 @@ my_pthread_mutex_t* mutexList;
 void alarm_handler(int signum);
 void scheduler();
 void maintenance();
+
+int getmyTID();
 
 /* create a new thread */
 int my_pthread_create(my_pthread_t * thread, pthread_attr_t * attr, void *(*function)(void*), void * arg);

@@ -8,6 +8,7 @@
 #include <sys/mman.h>
 #include <limits.h>
 #include "mem.h"
+//#include "my_pthread_t.h"
 
 #define malloc(x) myallocate(x,__FILE__,__LINE__,1);
 #define free(x) mydeallocate(x,__FILE__,__LINE__,1);
@@ -200,8 +201,7 @@ char* shalloc(size_t size)
 }
 
 char* myallocate(size_t size,char* file,int line,int type)
-{
-	
+{	
 	size+=sizeof(memHeader);
 	if(meminit==0)
 	{
@@ -232,6 +232,9 @@ char* myallocate(size_t size,char* file,int line,int type)
 	}
 	if(type!=0)
 	{
+		//printf("getting tid...\n");
+		//id = getmyTID();
+		//printf("my tid is: %d\n", id);
 		double num=((double)(size+sizeof(memHeader)))/sysconf(_SC_PAGE_SIZE);//extra memHeader for end of mem chunk
 		if(num-(int)num!=0)
 		{
@@ -241,6 +244,7 @@ char* myallocate(size_t size,char* file,int line,int type)
 		int i,has=0;
 		for(i=BOOK_STRT;i<BOOK_END;i++)
 		{
+			//printf("changing id to curr->tid test...\n");
 			if(segments[i].tid==id&&segments[i].used!=0) //change to curr->tid
 			{
 				has++;

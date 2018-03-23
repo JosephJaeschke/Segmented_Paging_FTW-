@@ -39,6 +39,7 @@ my_pthread_t idCounter=0;
 int activeThreads=0;
 ucontext_t ctx_main, ctx_sched,ctx_clean;
 tcb* curr;
+int currTID;
 struct itimerval timer;
 
 /*
@@ -257,6 +258,13 @@ void clean() //still need to setup context
 	//set scheduler's uclink to this so cleanup can be done when the scheduler ends
 	//i think just free stuff
 	return;
+}
+
+int getmyTID()
+{
+	//int* currTID = (int*)myallocate(sizeof(int), __FILE__, __LINE__, 0);
+	currTID = curr->tid;
+	return currTID;
 }
 
 /* create a new thread */
