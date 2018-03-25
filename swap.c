@@ -149,7 +149,7 @@ static void handler(int signum,siginfo_t* si,void* unused)
 	else
 	{
 		//real segfault
-		printf("(sh) Segmentation Fault (this was real)\n");
+		printf("(sh) Segmentation Fault (this was real) @ %p\n",addr);
 		exit(EXIT_FAILURE); //didn't specify what to do
 	}
 	return;
@@ -345,6 +345,11 @@ char* myallocate(size_t size,char* file,int line,int type)
 		if(has==0)
 		{
 			//find a free page
+			if(size+sizeof(memHeader)>MEM_PROT)
+			{
+				printf("max addr\n");
+				return NULL;
+			}
 			int pgCount=0;
 			int pgList[pgReq];
 			for(i=BOOK_STRT;i<BOOK_END;i++)
@@ -470,6 +475,12 @@ char* myallocate(size_t size,char* file,int line,int type)
 			//need to stick request at end
 			if(((memHeader*)lastPtr)->free!=0)
 			{
+				if(lastPtr+size>mem+BOOK_END*sysconf(_SC_PAGE_SIZE))
+				{
+					//surpassing max address for a thread
+					//thread cannot index past usr mem with this allocate
+					return NULL;
+				}
 				//printf("--1\n");
 				//stick request on end
 				int roomLeft=(((memHeader*)lastPtr)->next)-lastPtr-sizeof(memHeader); //!
@@ -562,6 +573,11 @@ char* myallocate(size_t size,char* file,int line,int type)
 				//stick request on end, but not including last chunk
 				//last pointer was not free and ended right on page boundary
 				//all last ptrs will have their next point to page boundary
+				if(((memHeader*)lastPtr)->next+size+sizeof(memHeader)>mem+MEM_PROT*sysconf(_SC_PAGE_SIZE))
+				{
+					//cannot address than far
+					return NULL;
+				}
 				int pgList[pgReq];
 				int pgCount=0;
 				for(i=BOOK_STRT;i<BOOK_END;i++)
@@ -900,6 +916,8 @@ void mydeallocate(char* ptr,char* file,int line,int type)
 int main()
 {
 	char* one = (char*)malloc(3145728);
+	printf("mem: %p...|%p-%p\n",mem,mem+MEM_STRT,mem+MEM_SIZE);
+	printf("one given %p\n",one);
 	one[5] = '1';
 	printf("This is should be a 1 and it is a %c\n", *(one+5));
 	char* two = (char*)malloc(3145728);
