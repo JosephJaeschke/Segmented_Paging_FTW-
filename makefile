@@ -8,6 +8,9 @@ m:
 	gcc -g -o multi multi.c
 pthread: my_pthread.c multi.c
 	gcc -Wall -o pthread my_pthread.c multi.c
+s:
+	gcc -g -o swap swap.c
 clean:
+	rm swap
 	rm malloc
 	rm phase2
