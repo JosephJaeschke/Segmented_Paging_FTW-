@@ -1,35 +1,17 @@
-// File:	my_pthread.c
-// Author:	Yujie REN
-// Date:	09/23/2017
-
-// name: Joseph Jaeschke, Crystal Calandra, Adeeb Kebir
-// username of iLab: jjj93, crystaca, ask171
-// iLab Server: cray1
-
-#include "my_pthread_t.h"
-#include "ucontext.h"
 #include <stdlib.h>
-#include <signal.h>
-#include <sys/time.h>
-#include <unistd.h>
-//for mem manager
-#include "mem.h"
 #include <stdio.h>
+#include <unistd.h>
 #include <string.h>
+#include <signal.h>
 #include <malloc.h>
 #include <assert.h>
 #include <sys/mman.h>
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <fcntl.h>
-#include <limits.h> 
+#include <limits.h>
+#include "mem.h"
 
-#define MAX_STACK 65536 //my TA told someone that 32k is a good number
-#define MAX_THREAD 32 //TA said a power of 2 and referenced 32
-#define MAX_MUTEX 32 //TA said a power of 2 and referenced 32
-#define MAINTENANCE 10 //not sure a good value
-#define PRIORITY_LEVELS 5 //not sure good value
-//for mem manager
 #define malloc(x) myallocate(x,__FILE__,__LINE__,1);
 #define free(x) mydeallocate(x,__FILE__,__LINE__,1);
 #define VER 987
@@ -40,34 +22,27 @@
 #define SHALLOC_STRT 2044//shalloc is 4
 #define SHALLOC_END 2048
 #define MEM_PROT 5861376//8372224 //don't want to mprotect shalloc region
+
 #define SWAP_SIZE 1677216 //16MB
 #define SWAP_END 4096
 
-short mode=0; //0 for SYS, 1 for USR
-short ptinit=0; //init main stuff at first call of pthread_create
-short maintenanceCounter=MAINTENANCE;
-my_pthread_t idCounter=0;
-int activeThreads=0;
-ucontext_t ctx_main, ctx_sched,ctx_clean;
-tcb* curr;
-struct itimerval timer;
-//for mem manager
-char* mem;
-int meminit=0; //has memory been initialized?
-int sysinit=0; //has system used memory yet?
-int shinit=0; //has shalloc been called yet?
-struct sigaction sa;
-memBook segments[2048]={0}; //metadata about memory 
-memBook swap[4096]={0}; //metadata about swap
-int swapfd; //swap file descriptor
-my_pthread_mutex_t mem_lock;
-my_pthread_mutex_t shalloc_lock;
+typedef struct tester_
+{
+	int a;
+	char b;
 
-/////////////////////////////////////////////////////////////////////////////
-//									   //
-//			  MEMORY MANAGER FUNCTIONS			   //
-//									   //
-/////////////////////////////////////////////////////////////////////////////
+} tester;
+
+char* mem;
+int meminit=0;
+int sysinit=0;
+int shinit=0;
+struct sigaction sa;
+int id=1; //equivalent to curr->tid
+memBook segments[2048]={0};
+memBook swap[4096]={0};
+
+int swapfd;
 
 static void handler(int signum,siginfo_t* si,void* unused)
 {
@@ -79,7 +54,7 @@ static void handler(int signum,siginfo_t* si,void* unused)
 		fflush(stdout);
 		int loc=(addr-mem)/sysconf(_SC_PAGE_SIZE);//page number of fault	
 		int find=loc-BOOK_STRT;//which of its pages thread wanted
-		if(segments[loc].tid==curr->tid&&segments[loc].pageNum==find)//page is already there
+		if(segments[loc].tid==id&&segments[loc].pageNum==find)//page is already there
 		{
 			if(mprotect(mem+loc*sysconf(_SC_PAGE_SIZE),sysconf(_SC_PAGE_SIZE),PROT_READ|PROT_WRITE)==-1)
 			{
@@ -91,14 +66,14 @@ static void handler(int signum,siginfo_t* si,void* unused)
 		}
 		//printf("(sh) %d!=%d and %d!=%d\n",segments[loc].tid,id,segments[loc].pageNum,find);
 		int i;
-		if(mprotect(mem+MEM_STRT,MEM_PROT,PROT_READ|PROT_WRITE)==-1)
+		if(mprotect(mem,MEM_PROT,PROT_READ|PROT_WRITE)==-1)
 		{
 			perror("ERROR: ");
 			exit(1);
 		}
 		for(i=BOOK_STRT;i<BOOK_END;i++)
 		{
-			if(segments[i].tid==curr->tid&&segments[i].pageNum==find)
+			if(segments[i].tid==id&&segments[i].pageNum==find)
 			{
 				//printf("(sh) found it b/c id=%d\n",segments[i].tid);
 				//move whats in i to loc
@@ -125,7 +100,7 @@ static void handler(int signum,siginfo_t* si,void* unused)
 		//look in swap for it
 		for(i=0;i<SWAP_END;i++)
 		{
-			if(swap[i].tid==curr->tid&&swap[i].pageNum==find)
+			if(swap[i].tid==id&&swap[i].pageNum==find)
 			{
 				//find a page to evict
 				//naive and choose the one in its spot
@@ -189,7 +164,7 @@ int abs(int a)
 	return a;
 }
 
-void* shalloc(size_t size)
+char* shalloc(size_t size)
 {
 	size+=sizeof(memHeader);
 	if(size+sizeof(memHeader)>4*sysconf(_SC_PAGE_SIZE))
@@ -199,7 +174,6 @@ void* shalloc(size_t size)
 	}
 	if(meminit==0)
 	{
-		meminit=1;
 		mem=(char*)memalign(sysconf(_SC_PAGE_SIZE),MEM_SIZE);
 		printf("mem:%p - %p\n",mem,mem+MEM_SIZE);
 		printf("header size:%lu,0x%X\n",sizeof(memHeader),(int)sizeof(memHeader));	
@@ -238,14 +212,11 @@ void* shalloc(size_t size)
 			perror("ERROR: ");
 			exit(1);
 		}
-		my_pthread_mutex_init(&mem_lock,NULL);
-		my_pthread_mutex_init(&shalloc_lock,NULL);
+		meminit=1;
 	}
-	my_pthread_mutex_lock(&shalloc_lock);
 	if(shinit==0)
 	{
 		//make a first header (makes things better later)
-		shinit=1;
 		memHeader new;
 		new.verify=VER;
 		new.prev=NULL;
@@ -261,8 +232,8 @@ void* shalloc(size_t size)
 			memcpy(mem+SHALLOC_STRT*sysconf(_SC_PAGE_SIZE)+size,&rest,sizeof(memHeader));
 		}
 		memcpy(mem+SHALLOC_STRT*sysconf(_SC_PAGE_SIZE),&new,sizeof(memHeader));
-		my_pthread_mutex_unlock(&shalloc_lock);
-		return ((void*)(mem+SHALLOC_STRT*sysconf(_SC_PAGE_SIZE)+sizeof(memHeader)));
+		shinit=1;
+		return mem+SHALLOC_STRT*sysconf(_SC_PAGE_SIZE)+sizeof(memHeader);
 	}
 	char* ptr=mem+SHALLOC_STRT*sysconf(_SC_PAGE_SIZE);
 	memHeader* bestPtr=NULL;
@@ -294,14 +265,12 @@ void* shalloc(size_t size)
 			bestPtr->next=((char*)bestPtr)+size;
 			memcpy(((char*)bestPtr)+size,&rest,sizeof(memHeader));
 		}
-		my_pthread_mutex_unlock(&shalloc_lock);
-		return ((void*)((char*)bestPtr+sizeof(memHeader)));
+		return (char*)bestPtr+sizeof(memHeader);
 	}
-	my_pthread_mutex_unlock(&shalloc_lock);
 	return NULL;
 }
 
-void* myallocate(size_t size,char* file,int line,int type)
+char* myallocate(size_t size,char* file,int line,int type)
 {
 	
 	size+=sizeof(memHeader);
@@ -350,8 +319,6 @@ void* myallocate(size_t size,char* file,int line,int type)
 			perror("ERROR: ");
 			exit(1);
 		}
-		my_pthread_mutex_init(&mem_lock,NULL);
-		my_pthread_mutex_init(&shalloc_lock,NULL);
 		meminit=1;
 	}
 	if(mprotect(mem+MEM_STRT,MEM_PROT,PROT_NONE)==-1)//want sig handler to put things in place for us
@@ -361,7 +328,6 @@ void* myallocate(size_t size,char* file,int line,int type)
 	}
 	if(type!=0)
 	{
-		my_pthread_mutex_lock(&mem_lock);
 		double num=((double)(size+sizeof(memHeader)))/sysconf(_SC_PAGE_SIZE);//extra memHeader for end of mem chunk
 		if(num-(int)num!=0)
 		{
@@ -371,7 +337,7 @@ void* myallocate(size_t size,char* file,int line,int type)
 		int i,has=0;
 		for(i=BOOK_STRT;i<BOOK_END;i++)
 		{
-			if(segments[i].tid==curr->tid&&segments[i].used!=0) //change to curr->tid
+			if(segments[i].tid==id&&segments[i].used!=0) //change to curr->tid
 			{
 				has++;
 			}
@@ -381,8 +347,7 @@ void* myallocate(size_t size,char* file,int line,int type)
 			//find a free page
 			if(size+sizeof(memHeader)>MEM_PROT)
 			{
-				//max address reached
-				my_pthread_mutex_unlock(&mem_lock);
+				printf("max addr\n");
 				return NULL;
 			}
 			int pgCount=0;
@@ -419,18 +384,17 @@ void* myallocate(size_t size,char* file,int line,int type)
 				if(swapCount+pgCount!=pgReq)
 				{
 					//not enough space
-					my_pthread_mutex_unlock(&mem_lock);
 					return NULL;
 				}
 				for(i=0;i<pgCount;i++)
 				{
-					segments[pgList[i]].tid=curr->tid;
+					segments[pgList[i]].tid=id;
 					segments[pgList[i]].pageNum=i;
 					segments[pgList[i]].used=1;
 				}
 				for(i=0;i<swapCount;i++)
 				{
-					swap[swapList[i]].tid=curr->tid;
+					swap[swapList[i]].tid=id;
 					swap[swapList[i]].pageNum=pgCount+i;
 					swap[swapList[i]].used=1;
 				}
@@ -445,12 +409,11 @@ void* myallocate(size_t size,char* file,int line,int type)
 				rest.next=mem+(BOOK_STRT+pgReq)*sysconf(_SC_PAGE_SIZE);
 				memcpy(mem+BOOK_STRT*sysconf(_SC_PAGE_SIZE),&new,sizeof(memHeader));
 				memcpy(mem+(BOOK_STRT+pgReq)*sysconf(_SC_PAGE_SIZE)+size,&rest,sizeof(memHeader));
-				my_pthread_mutex_unlock(&mem_lock);
-				return ((void*)(mem+BOOK_STRT*sysconf(_SC_PAGE_SIZE)+sizeof(memHeader)));
+				return mem+BOOK_STRT*sysconf(_SC_PAGE_SIZE)+sizeof(memHeader);				
 			}
 			for(i=0;i<pgReq;i++)
 			{
-				segments[pgList[i]].tid=curr->tid; //change to curr->id
+				segments[pgList[i]].tid=id; //change to curr->id
 				segments[pgList[i]].pageNum=i;
 				segments[pgList[i]].used=1;
 			}
@@ -466,8 +429,7 @@ void* myallocate(size_t size,char* file,int line,int type)
 			//memcpy will trigger SIGSEGV, but handler will find the page and swap it in
 			memcpy(mem+BOOK_STRT*sysconf(_SC_PAGE_SIZE),&new,sizeof(memHeader));
 			memcpy(mem+BOOK_STRT*sysconf(_SC_PAGE_SIZE)+size,&rest,sizeof(memHeader));
-			my_pthread_mutex_unlock(&mem_lock);
-			return ((void*)(mem+BOOK_STRT*sysconf(_SC_PAGE_SIZE)+sizeof(memHeader)));
+			return mem+BOOK_STRT*sysconf(_SC_PAGE_SIZE)+sizeof(memHeader);
 		}
 		else //we already have pages
 		{
@@ -508,8 +470,7 @@ void* myallocate(size_t size,char* file,int line,int type)
 					bestPtr->next=((char*)bestPtr)+size;
 					memcpy(((char*)bestPtr)+size,&rest,sizeof(memHeader));
 				}
-				my_pthread_mutex_unlock(&mem_lock);
-				return ((void*)(((char*)bestPtr)+sizeof(memHeader)));
+				return ((char*)bestPtr)+sizeof(memHeader);
 			}
 			//need to stick request at end
 			if(((memHeader*)lastPtr)->free!=0)
@@ -518,7 +479,6 @@ void* myallocate(size_t size,char* file,int line,int type)
 				{
 					//surpassing max address for a thread
 					//thread cannot index past usr mem with this allocate
-					my_pthread_mutex_unlock(&mem_lock);
 					return NULL;
 				}
 				//printf("--1\n");
@@ -565,18 +525,17 @@ void* myallocate(size_t size,char* file,int line,int type)
 					}
 					if(swapCount+newCount!=newReq)
 					{
-						my_pthread_mutex_unlock(&mem_lock);
 						return NULL;
 					}
 					for(i=0;i<newCount;i++)
 					{
-						segments[newList[i]].tid=curr->tid;
+						segments[newList[i]].tid=id;
 						segments[newList[i]].pageNum=has+i;
 						segments[newList[i]].used=1;
 					}
 					for(i=0;i<swapCount;i++)
 					{
-						swap[swapList[i]].tid=curr->tid;
+						swap[swapList[i]].tid=id;
 						swap[swapList[i]].pageNum=has+newCount+i;
 						swap[swapList[i]].used=1;
 					}
@@ -588,12 +547,11 @@ void* myallocate(size_t size,char* file,int line,int type)
 					rest.next=mem+(BOOK_STRT+has+newReq)*sysconf(_SC_PAGE_SIZE);
 					rest.verify=VER;
 					memcpy(lastPtr+size,&rest,sizeof(memHeader));
-					my_pthread_mutex_unlock(&mem_lock);
-					return ((void*)(lastPtr+sizeof(memHeader)));
+					return lastPtr+sizeof(memHeader);
 				}
 				for(i=0;i<newReq;i++)
 				{
-					segments[newList[i]].tid=curr->tid;
+					segments[newList[i]].tid=id;
 					segments[newList[i]].pageNum=has+i;
 					segments[newList[i]].used=1;
 				}
@@ -607,8 +565,7 @@ void* myallocate(size_t size,char* file,int line,int type)
 				rest.next=mem+(BOOK_STRT+has+newReq)*sysconf(_SC_PAGE_SIZE); //!
 				rest.verify=VER;
 				memcpy(lastPtr+size,&rest,sizeof(memHeader));
-				my_pthread_mutex_unlock(&mem_lock);
-				return ((void*)(lastPtr+sizeof(memHeader)));
+				return lastPtr+sizeof(memHeader);
 			}
 			else
 			{
@@ -619,7 +576,6 @@ void* myallocate(size_t size,char* file,int line,int type)
 				if(((memHeader*)lastPtr)->next+size+sizeof(memHeader)>mem+MEM_PROT*sysconf(_SC_PAGE_SIZE))
 				{
 					//cannot address than far
-					my_pthread_mutex_unlock(&mem_lock);
 					return NULL;
 				}
 				int pgList[pgReq];
@@ -655,18 +611,17 @@ void* myallocate(size_t size,char* file,int line,int type)
 					}
 					if(swapCount+pgCount!=pgReq)
 					{
-						my_pthread_mutex_unlock(&mem_lock);
 						return NULL;
 					}
 					for(i=0;i<pgCount;i++)
 					{
-						segments[pgList[i]].tid=curr->tid;
+						segments[pgList[i]].tid=id;
 						segments[pgList[i]].pageNum=has+i;
 						segments[pgList[i]].used=1;
 					}
 					for(i=0;i<swapCount;i++)
 					{
-						swap[swapList[i]].tid=curr->tid;
+						swap[swapList[i]].tid=id;
 						swap[swapList[i]].pageNum=has+pgCount+i;
 						swap[swapList[i]].used=1;
 					}
@@ -681,12 +636,11 @@ void* myallocate(size_t size,char* file,int line,int type)
 					rest.next=mem+(BOOK_STRT+has+pgReq)*sysconf(_SC_PAGE_SIZE);
 					memcpy(mem+(BOOK_STRT+has)*sysconf(_SC_PAGE_SIZE),&new,sizeof(memHeader));
 					memcpy(mem+(BOOK_STRT+has)*sysconf(_SC_PAGE_SIZE)+size,&rest,sizeof(memHeader));
-					my_pthread_mutex_unlock(&mem_lock);
-					return ((void*)(mem+(BOOK_STRT+has)*sysconf(_SC_PAGE_SIZE)+sizeof(memHeader)));
+					return mem+(BOOK_STRT+has)*sysconf(_SC_PAGE_SIZE)+sizeof(memHeader);
 				}
 				for(i=0;i<pgCount;i++)
 				{
-					segments[i].tid=curr->tid; //chnge to curr->id
+					segments[i].tid=id; //chnge to curr->id
 					segments[i].pageNum=has+i;
 					segments[i].used=1;
 				}
@@ -701,8 +655,7 @@ void* myallocate(size_t size,char* file,int line,int type)
 				rest.next=mem+(BOOK_STRT+has+pgReq)*sysconf(_SC_PAGE_SIZE);
 				memcpy(mem+(BOOK_STRT+has)*sysconf(_SC_PAGE_SIZE),&new,sizeof(memHeader));
 				memcpy(mem+(BOOK_STRT+has)*sysconf(_SC_PAGE_SIZE)+size,&rest,sizeof(memHeader));
-				my_pthread_mutex_unlock(&mem_lock);
-				return ((void*)(mem+(BOOK_STRT+has)*sysconf(_SC_PAGE_SIZE)+sizeof(memHeader)));
+				return mem+(BOOK_STRT+has)*sysconf(_SC_PAGE_SIZE)+sizeof(memHeader);
 			}
 		}
 	}
@@ -725,7 +678,7 @@ void* myallocate(size_t size,char* file,int line,int type)
 			memcpy(mem,&new,sizeof(memHeader));
 			memcpy(mem+size,&rest,sizeof(memHeader));
 			sysinit=1;
-			return ((void*)(mem+sizeof(memHeader)));
+			return mem+sizeof(memHeader);
 		}
 		char* ptr=mem;
 		memHeader* bestPtr=NULL;
@@ -757,9 +710,9 @@ void* myallocate(size_t size,char* file,int line,int type)
 				bestPtr->next=((char*)bestPtr)+size;
 				memcpy(bestPtr->next,&rest,sizeof(memHeader));
 			}
-			return ((void*)(((char*)bestPtr)+sizeof(memHeader)));
+			return ((char*)bestPtr)+sizeof(memHeader);
 		}
-		return NULL; //memory is full
+		return NULL; //big problem. Shouldn't happen though
 	}
 }
 
@@ -913,9 +866,8 @@ void coalesce(char* ptr,int type,int has)
 	}
 }
 
-void mydeallocate(void* ptr_to_mem,char* file,int line,int type)
+void mydeallocate(char* ptr,char* file,int line,int type)
 {
-	char* ptr=(char*)ptr_to_mem;
 	printf("-dealoc\n");
 	memHeader* real=((memHeader*)(ptr-sizeof(memHeader)));
 	//printf("ver=%d\n",real->verify);
@@ -931,7 +883,7 @@ void mydeallocate(void* ptr_to_mem,char* file,int line,int type)
 		int i;
 		for(i=BOOK_STRT;i<BOOK_END;i++)
 		{
-			if(segments[i].tid==curr->tid&&segments[i].used!=0)//change to curr->id
+			if(segments[i].tid==id&&segments[i].used!=0)//change to curr->id
 			{
 				has++;
 			}
@@ -946,7 +898,7 @@ void mydeallocate(void* ptr_to_mem,char* file,int line,int type)
 		printf("ERROR: Not pointing to void addr\n");
 		return;
 	}
-	if(type!=0&&segments[((char*)real-mem)/sysconf(_SC_PAGE_SIZE)].tid!=curr->tid)//will be changed to look at memBook
+	if(segments[((char*)real-mem)/sysconf(_SC_PAGE_SIZE)].tid!=id)//will be changed to look at memBook
 	{
 		printf("ERROR: You do not own this memory\n");
 		return;
@@ -961,603 +913,66 @@ void mydeallocate(void* ptr_to_mem,char* file,int line,int type)
 	return;
 }
 
-/////////////////////////////////////////////////////////////////////////////
-//									   //
-//			MEMORY MANAGER FUNCTIONS END			   //
-//									   //
-/////////////////////////////////////////////////////////////////////////////
-
-
-
-void wrapper(int f1,int f2,int a1,int a2)
+int main()
 {
-	mask p;
-	p.halfs.hhalf=a1;
-	p.halfs.lhalf=a2;
-	mask s;
-	s.halfs.hhalf=f1;
-	s.halfs.lhalf=f2;
-
-	void* a=(void*)p.data;
-	void*(*f)(void*)=(void*(*)(void*))s.data;
-
-//	printf("--start wrapping\n");
-	curr->retVal=(*f)(a);
-//	printf("--done wrapping\n");
-//	fflush(stdout);
-	if(curr->state!=4)
-	{
-		curr->retVal=(void*)myallocate(1,__FILE__,__LINE__,0);
-		my_pthread_exit(curr->retVal);
-	}
-	return;
-}
-
-void alarm_handler(int signum)
-{
-	//printf("===ALARM=== (mode=%d)\n",mode);
-	if(mode==0)
-	{
-		return;
-	}
-	//i put the stuff in sched. I hope it is not too slow, but it was better for debugging
-	if(swapcontext(&curr->context, &ctx_sched)==-1)
-	{
-		printf("ERROR: Failed to swap to sched\n");
-		fflush(stdout);
-	}
-	return;
-}
-
-void scheduler()
-{
-	//put remove thread stuff in because of mutex
-	while(1)
-	{
-		//printf("-s\n");
-		//fflush(stdout);
-		mode=0;
-//		printf("-sched\n");
-//		printf("--tid:%u op:%d\n",curr->tid,curr->oldPriority);
-//		printf("--tid2:%u\n",queue[curr->oldPriority]->tid);
-		//printf("--sched | p=%u, op=%u\n",curr->priority,curr->oldPriority);
-		//fflush(stdout);
-		//remove curr from queue at old priority level
-		if(curr->state!=4 && curr->state != 3)
-		{
-			//printf(queue[oldPriority] = %d, curr->tid = %d\n", queue[curr->oldPriority]->tid, curr->tid);
-			if(queue[curr->oldPriority]->tid == curr->tid)
-			{	
-				queue[curr->oldPriority]=queue[curr->oldPriority]->nxt;
-			}
-			else
-			{
-				tcb *ptr, *prev;
-				ptr = queue[curr->oldPriority];
-				while(ptr->nxt != NULL)
-				{
-					if(ptr->tid == curr->tid)
-					{
-						prev->nxt = ptr->nxt;
-						break;
-					}
-					prev = ptr;
-					ptr = ptr->nxt;
-				}
-			}
-			if(curr->priority<PRIORITY_LEVELS-1)//////////////////////////////
-			{
-				curr->priority++;
-			}
-			curr->oldPriority=curr->priority;///////////////////////////////
-			//put old thread back in queue
-			curr->nxt=NULL;
-			if(queue[curr->priority]==NULL)//if empty
-			{
-				queue[curr->priority]=curr;
-			}
-			else
-			{
-				tcb* temp=queue[curr->priority];
-				while(temp->nxt!=NULL)
-				{
-					temp=temp->nxt;
-				}
-				temp->nxt=curr;
-			}
-		}
-		int i,found=0;
-		tcb* ptr;
-		curr->state=1;
-//		maintenanceCounter--;
-//		if(maintenanceCounter==0)
-//		{
-//			maintenanceCounter=MAINTENANCE;
-//			maintenance();
-//		}
-		//try to find a thread that can be run
-		for(i=0;i<PRIORITY_LEVELS;i++)
-		{
-			ptr=queue[i];
-			while(ptr!=NULL)
-			{
-				if(ptr->state==1)
-				{
-					ptr->state=2;
-					curr=ptr;
-					found=1;
-					break;
-				}
-				ptr=ptr->nxt;
-			}
-			if(found)
-			{
-//				printf("--run thread w/ id=%u p=%d op=%d\n",curr->tid,curr->priority,curr->oldPriority);
-				fflush(stdout);
-				break;
-			}
-		}
-		//if there is no thread that can run
-		if(!found)
-		{
-//			printf("--Found no thread ready to run\n");
-			return;
-		}
-		//printf("-end s\n");
-		if(mprotect(mem+MEM_STRT,MEM_PROT,PROT_NONE)==-1)
-		{
-			perror("ERROR: ");
-			exit(1);
-		}
-		timer.it_value.tv_sec=0;
-		timer.it_value.tv_usec=(curr->priority+1)*25000;
-		setitimer(ITIMER_REAL,&timer,NULL);
-		mode=1;
-		swapcontext(&ctx_sched,&curr->context);
-	}
-	return;
-}
-
-void maintenance()
-{
-	printf("m\n");
-	fflush(stdout);
-	//give all threads priority 0 to prevent starvation
+	tester* t=(tester*)malloc(sizeof(tester));
+	printf("mem: %p...|%p-%p\n",mem,mem+MEM_STRT,mem+MEM_SIZE);
+	//printf("SHALLOC REGION: %p - %p\n",mem+SHALLOC_STRT*sysconf(_SC_PAGE_SIZE),mem+SHALLOC_END*sysconf(_SC_PAGE_SIZE));
+	printf("t Given %p\n",t);
+	t->a=5;
+	//////////////////
+	id=2;
+	tester* u=(tester*)malloc(sizeof(tester));
+	printf("u Given %p\n",u);
+	u->a=-2;
+	/////////////////
+	id=1;
+	mprotect(mem,MEM_SIZE,PROT_NONE);
+	printf("t again, t->a=%d\n",t->a);
+	char* t2=malloc(8192);
+	printf("t2 Given %p\n",t2);
+	tester* t3=(tester*)malloc(sizeof(tester));
+	printf("t3 Given %p\n",t3);
 	int i;
-	tcb* new=(tcb*)myallocate(sizeof(tcb),__FILE__,__LINE__,0);
-	tcb* head=new;
-	tcb* tmp;
-	for(i=0;i<PRIORITY_LEVELS;i++)
+	for(i=0;i<8192;i++)
 	{
-		if(queue[i]!=NULL)
-		{
-			new->nxt=queue[i];
-			while(new->nxt!=NULL)
-			{
-				new->priority=0;
-				new->oldPriority=0;
-				new=new->nxt;
-			}
-			new->priority=0;
-			new->oldPriority=0;
-			queue[i]=NULL;
-		}
+		t2[i]='q';
 	}
-	queue[0]=head->nxt;
-	new=head;
-	mydeallocate(new,__FILE__,__LINE__,0);
-	return;
-}
+	t2[8191]='\0';
+//	printf("t2: %s\nt->a=%d\n",t2,t->a);
+	////////
+	/*
+	id=2;
+	mprotect(mem,MEM_SIZE,PROT_NONE);
+	printf("u->a=%d\n",u->a);
+	free((char*)u);
+	u=(tester*)malloc(sizeof(tester));
+	printf("u Given %p\n",u);
+	/////// */
+	id=1;
+	mprotect(mem,MEM_SIZE,PROT_NONE);
+	free((char*)t2);
+	free((char*)t);
+	t=(tester*)malloc(sizeof(tester));
+	printf("t Given %p\n",t);
+	printf("*** RAN TO COMPLETION ***\n");
 
-void clean() //still need to setup context
-{
-	//set scheduler's uclink to this so cleanup can be done when the scheduler ends
-	//i think just free stuff
-	return;
-}
-
-/* create a new thread */
-int my_pthread_create(my_pthread_t* thread, pthread_attr_t* attr, void*(*function)(void*), void * arg)
-{
-//	printf("--create\n");
-	if(ptinit==0)
+/*
+	char* t=myallocate(5000,__FILE__,__LINE__,6);
+	printf("SE:%p\n",mem+SHALLOC_END*sysconf(_SC_PAGE_SIZE));
+//	printf("sizeof(tester)=%lu\n",sizeof(tester));
+//	printf("+%p\n",((memHeader*)((memHeader*)((char*)t-sizeof(memHeader)))->next)->next);
+	printf("t Given ptr=%p\n",t);
+	int i;
+	for(i=0;i<5000;i++)
 	{
-		//init stuff
-		//set up main thread/context
-		queue=(tcb**)myallocate(PRIORITY_LEVELS*sizeof(tcb),__FILE__,__LINE__,0);
-		terminating=(tcb*)myallocate(sizeof(tcb),__FILE__,__LINE__,0);
-		int i=0;
-		for(i;i<PRIORITY_LEVELS;i++)
-		{
-			queue[0]=NULL;
-		}
-		if(getcontext(&ctx_main)==-1)
-		{
-			printf("ERROR: Failed to get context for main\n");
-			return 1;
-		}
-		tcb* maint=(tcb*)myallocate(sizeof(tcb),__FILE__,__LINE__,0);
-		maint->state=0;
-		maint->tid=idCounter++;
-		maint->context=ctx_main;
-		maint->retVal=NULL;
-		maint->priority=0;
-		maint->oldPriority=0;
-		maint->nxt=NULL;
-		maint->state=1;
-		curr=maint;
-		queue[0]=maint;
-//		printf("--Got main context\n");
-		//set up context for cleanup
-//		if(getcontext(&ctx_clean)==-1)
-//		{
-//			printf("ERROR: Failed to get context for cleanup\n");
-//			return 1;
-//		}
-//		makecontext(&ctx_clean,clean,0);
-
-		//set up scheduler thread/context
-		if(getcontext(&ctx_sched)==-1)
-		{
-			printf("ERROR: Failed to get context for scheduler\n");
-			return 1;
-		}
-		ctx_sched.uc_link=0;
-		ctx_sched.uc_stack.ss_sp=(void*)myallocate(MAX_STACK,__FILE__,__LINE__,0);
-		ctx_sched.uc_stack.ss_size=MAX_STACK;
-		/*
-		tcb* schedt=malloc(sizeof(tcb*));
-		schedt->state=0;
-		activeThreads++;
-		schedt->tid=idCounter++;
-		schedt->context=ctx_sched;
-		schedt->retVal=NULL;
-		schedt->timeslice=0;
-		schedt->priority=0;
-		schedt->nxt=NULL;
-		schedt->state=1;
-		*/
-		makecontext(&ctx_sched,scheduler,0);
-//		printf("--Got context for scheduler\n");
-
-		//set first timer
-		signal(SIGALRM,alarm_handler);
-		timer.it_value.tv_sec=0;	
-		timer.it_value.tv_usec=25000; 
-		setitimer(ITIMER_REAL,&timer,NULL);
-//		printf("--timer set\n");
-		ptinit=1;
+		t[i]='d';
 	}
-	if(activeThreads==MAX_THREAD)
-	{
-		printf("ERROR: Maximum amount of threads are made, could not make new one\n");
-		return 1;
-	}
-	ucontext_t ctx_func;
-	if(getcontext(&ctx_func)==-1)
-	{
-		printf("ERROR: Failed to get context for new thread\n");
-		return 1;
-	}
-	ctx_func.uc_link=&curr->context;  //i think ************************
-	ctx_func.uc_stack.ss_sp=(void*)myallocate(MAX_STACK,__FILE__,__LINE__,0);
-	ctx_func.uc_stack.ss_size=MAX_STACK;
-	tcb* t=(tcb*)myallocate(sizeof(tcb),__FILE__,__LINE__,0);
-	t->state=0;
-	t->tid=idCounter++;
-	*thread=t->tid;
-	t->context=ctx_func;
-	t->retVal=NULL;
-	t->priority=0;
-	t->oldPriority=0;
-	t->nxt=NULL;
-	t->state=1;
-
-
-	mask params;
-	params.data=arg;
-	mask subroutine;
-	subroutine.data=function;
-
-	makecontext(&t->context,(void(*)(void))wrapper,4,subroutine.halfs.hhalf,subroutine.halfs.lhalf,params.halfs.hhalf,params.halfs.lhalf);
-
-
-	if(queue[0]==NULL)
-	{
-		queue[0]=t;
-	}
-	else
-	{
-		tcb* ptr=queue[0];
-		while(ptr->nxt!=NULL)
-		{
-			ptr=ptr->nxt;
-		}
-		ptr->nxt=t;
-	}
-//	printf("--added to queue, id %u\n",t->tid);
-	activeThreads++;
+	t[4999]='\0';
+	printf("t string:%s\n",t);
+	//mydeallocate(t,__FILE__,__LINE__,6);
+	char* hey=myallocate(sizeof(char),__FILE__,__LINE__,6);
+	printf("hey given ptr=%p\n",hey);
+*/
 	return 0;
 }
-
-/* give CPU pocession to other user level threads voluntarily */
-int my_pthread_yield()
-{
-//	printf("--yield\n");
-	fflush(stdout);
-	curr->priority = PRIORITY_LEVELS-1;
-	swapcontext(&curr->context,&ctx_sched);
-}
-
-/* terminate a thread */
-void my_pthread_exit(void* value_ptr)
-{
-//	printf("--exit\n");
-	if(value_ptr==NULL)
-	{
-		printf("ERROR: value_ptr is NULL\n");
-		return;
-	}
-	//mark thread as terminating
-	curr->state=4;
-	//remove curr from queue
-	if(queue[curr->priority]->tid==curr->tid)
-	{
-		queue[curr->priority]=queue[curr->priority]->nxt;
-	}
-	else
-	{
-		tcb* ptr;
-		ptr=queue[curr->priority];
-		tcb* prev;
-		while(1)
-		{
-			if(ptr->tid==curr->tid)
-			{
-				prev->nxt=ptr->nxt;
-				break;
-			}
-			prev=ptr;
-			ptr=ptr->nxt;
-		}
-	}
-	//add curr to terminating list
-	if(terminating==NULL)
-	{
-		terminating=curr;
-		curr->nxt=NULL;
-	}
-	else
-	{
-		curr->nxt=terminating;
-		terminating=curr;
-		
-	}
-	//set value_ptr to retVal of terminating thread?
-	curr->retVal=value_ptr;
-	//yield thread
-	my_pthread_yield();
-	return;
-}
-
-/* wait for thread termination */
-int my_pthread_join(my_pthread_t thread, void **value_ptr)
-{
-//	printf("--join\n");
-	//mark thread as waiting
-	curr->state=5;
-	//look for "thread" in terminating list
-	while(1)
-	{
-		if(terminating==NULL)
-		{
-			continue;
-		}
-		else if(terminating->tid==thread)//thread is first in list
-		{
-			tcb* ptr=(tcb*)myallocate(sizeof(tcb),__FILE__,__LINE__,0);
-			ptr=terminating;
-			//dereference ** to set equal to return thing
-			//to deref **, cast to double (sizeof(double)=sizeof(pointer))
-			//goto location and set what void* retVal points to
-			if(value_ptr!=NULL)
-			{	
-				double** temp=(double**)value_ptr;
-				*temp=terminating->retVal;	
-			}
-			terminating=terminating->nxt;
-			if(ptr->context.uc_stack.ss_sp!=NULL)
-			{
-				mydeallocate((ptr->context.uc_stack.ss_sp),__FILE__,__LINE__,0);
-			}
-			mydeallocate(ptr,__FILE__,__LINE__,0);
-			activeThreads--;
-			curr->state=1;
-			int i;
-			for(i=BOOK_STRT;i<BOOK_END;i++)
-			{
-				if(segments[i].tid==thread)
-				{
-					segments[i].used=0;
-				}
-			}
-			for(i=0;i<SWAP_SIZE;i++)
-			{
-				if(swap[i].tid==thread)
-				{
-					swap[i].used=0;
-				}
-			}
-			return 0;
-		}
-		else//thread is not first in list
-		{
-			tcb* ptr=terminating;
-			tcb* prev=ptr;
-			ptr=ptr->nxt;
-			while(ptr!=NULL)
-			{
-				if(ptr->tid==thread)
-				{
-					prev->nxt=ptr->nxt;
-					if(value_ptr!=NULL)
-					{
-						double** temp=(double**)value_ptr;
-						*temp=ptr->retVal;
-					}
-					mydeallocate(ptr->context.uc_stack.ss_sp,__FILE__,__LINE__,0);
-					mydeallocate(ptr,__FILE__,__LINE__,0);
-					activeThreads--;
-					return 0;
-				}
-				ptr=ptr->nxt;
-			}
-		}
-		my_pthread_yield();
-	}
-	return 0;
-}
-/* initial the mutex lock */
-int my_pthread_mutex_init(my_pthread_mutex_t *mutex, const pthread_mutexattr_t *mutexattr) 
-{
-
-//	printf("mutex_init\n");
-	//from my understanding, the user is passing in a pointer to a my_pthread_mutex_t object, which is a struct pointer?
-	if (mutexList == NULL)
-	{
-		mutexList =  mutex;
-	}else{
-		my_pthread_mutex_t *ptr = mutexList;
-		while (ptr->next != NULL)
-		{
-			ptr = ptr->next;
-			
-		}
-		ptr->next = mutex;
-	}
-	mutex->locked = 0;
-	mutex->maxP=PRIORITY_LEVELS;
-	//mutex->has = curr;
-	mutex->next = NULL;
-	//printf("mutex initialized, locked = %d\n", mutex->locked);
-	return 0;
-}
-
-/* aquire the mutex lock */
-int my_pthread_mutex_lock(my_pthread_mutex_t *mutex) 
-{
-//	printf(" mutex_lock\n");
-	int lockStatus;
-	while((lockStatus = __atomic_test_and_set(&mutex->locked, __ATOMIC_SEQ_CST)) == 1)
-	{
-		
-		//mutex already locked, change state to waiting
-		curr->state = 3;
-	//	printf("mutex was already locked!!! OH NOOOS!! state = %d\n", curr->state);
-		//remove curr from ready queue
-		if (queue[curr->priority]->tid == curr->tid)
-		{
-			queue[curr->priority] = curr->nxt;
-		}else{
-			tcb *ptr, *prev;
-			ptr = queue[curr->priority];
-			while(ptr->nxt != NULL)
-			{
-				if (ptr->tid == curr->tid)
-				{
-					prev->nxt = ptr->nxt;
-					break;
-				}
-				prev = ptr;
-				ptr = ptr->nxt;
-			}
-		}
-	//	printf("mutex removed curr from ready!!!!!!!!!!!!!\n");
-		
-		//place curr at the end of waiting queue for this mutex
-		if(mutex->waiting == NULL)
-		{
-			mutex->waiting = curr;
-		}else{
-			tcb *ptr = mutex->waiting;
-			while(ptr->nxt != NULL)
-			{
-				ptr = ptr->nxt;
-			}
-			ptr->nxt = curr;
-		}
-	//	printf("mutex placed curr at end of waiting queue! ready to yield\n");
-		my_pthread_yield();
-	}
-	if (lockStatus == 2){
-		printf("ERROR: attempting to lock 'destroyed' mutex\n");
-		return 1;
-	}
-
-	//printf("mutex was not locked. mutex is belong to me now! mwuahahahaha!\n");
-	return 0;
-}
-
-/* release the mutex lock */
-int my_pthread_mutex_unlock(my_pthread_mutex_t *mutex) 
-{
-//	printf(" mutex_unlock\n");
-	//double check that mutex is not already unlocked (just in case)
-	if(mutex->locked == 0)
-	{
-		printf("ERROR: Attempting to unlock UNLOCKED mutex\n");
-		return 1;
-	}
-
-	//update mutex_locked status and place next in waiting queue into ready queue
-	__atomic_clear(&mutex->locked, __ATOMIC_SEQ_CST);
-	if (mutex->waiting != NULL)
-	{
-		tcb *ptr = mutex->waiting;
-		mutex->waiting = ptr->nxt;
-		ptr->state = 1; //change state to ready
-		ptr->nxt = queue[0]; //add to front of priority queue for now
-		queue[0] = ptr;	//need to properly add
-		ptr->priority = 0; //reintegrating into society
-		ptr->oldPriority = 0;
-	}
-	//printf("mutex should be unlocked now and next in waiting queue is now ready!\n");
-	return 0;
-}
-
-/* destroy the mutex */
-int my_pthread_mutex_destroy(my_pthread_mutex_t *mutex) 
-{
-//	printf("mutex_destroy\n");
-	//cannot destroy a locked mutex
-	if (mutex->locked == 1)
-	{
-		printf("ERROR: Attempting to destroy LOCKED mutex\n");
-		return 1;
-	}
-
-	//change status to "destroyed" and remove from mutexList
-	mutex->locked = 2;
-	my_pthread_mutex_t *prev, *ptr;
-	ptr = mutexList;
-	while (ptr->next != NULL)
-	{
-		if (ptr == mutex)
-		{
-			if (prev == NULL)
-			{
-				mutexList = mutex->next;
-				mutex->next = NULL;
-			}else{
-				prev->next = mutex->next;
-				mutex->next = NULL;
-			}
-		}else{
-			prev = ptr;
-			ptr = ptr->next;
-		}
-	}
-	//printf("mutex should be removed from mutexList and lock status = %d\n", mutex->locked);
-	return 0;
-}
-
