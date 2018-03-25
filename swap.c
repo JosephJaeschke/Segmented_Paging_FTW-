@@ -899,6 +899,30 @@ void mydeallocate(char* ptr,char* file,int line,int type)
 
 int main()
 {
+	char* one = (char*)malloc(3145728);
+	one[5] = '1';
+	printf("This is should be a 1 and it is a %c\n", *(one+5));
+	char* two = (char*)malloc(3145728);
+	two[5] = '1';
+	printf("This is should be a 1 and it is a %c\n", *(two+5));
+	char* three = (char*)malloc(3145728);
+	three[5] = '1';
+	printf("This is should be a 1 and it is a %c\n", *(three+5));
+	char* four = (char*)malloc(3145728);
+	four[5] = '1';
+	printf("This is should be a 1 and it is a %c\n", *(four+5));
+
+	
+	one[5] = '2';
+	four[5] = '2';
+	three[5] = '2';
+	two[5] = '2';
+
+	printf("This is should be a 2 and it is a %c\n", *(one+5));
+	printf("This is should be a 2 and it is a %c\n", *(two+5));
+	printf("This is should be a 2 and it is a %c\n", *(three+5));
+	printf("This is should be a 2 and it is a %c\n", *(four+5));
+
 	tester* t=(tester*)malloc(sizeof(tester));
 	printf("mem: %p...|%p-%p\n",mem,mem+MEM_STRT,mem+MEM_SIZE);
 	//printf("SHALLOC REGION: %p - %p\n",mem+SHALLOC_STRT*sysconf(_SC_PAGE_SIZE),mem+SHALLOC_END*sysconf(_SC_PAGE_SIZE));
@@ -917,7 +941,8 @@ int main()
 	printf("t2 Given %p\n",t2);
 	tester* t3=(tester*)malloc(sizeof(tester));
 	printf("t3 Given %p\n",t3);
-	for(int i=0;i<8192;i++)
+	int i;
+	for(i=0;i<8192;i++)
 	{
 		t2[i]='q';
 	}
