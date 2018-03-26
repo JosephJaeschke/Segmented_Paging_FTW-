@@ -306,7 +306,7 @@ void* shalloc(size_t size)
 			memcpy(((char*)bestPtr)+size,&rest,sizeof(memHeader));
 		}
 		my_pthread_mutex_unlock(&shalloc_lock);
-		return ((void*)((char*)bestPtr+sizeof(memHeader)));
+		return ((void*)(((char*)bestPtr)+sizeof(memHeader)));
 	}
 	my_pthread_mutex_unlock(&shalloc_lock);
 	return NULL;
@@ -315,7 +315,6 @@ void* shalloc(size_t size)
 void* myallocate(size_t size,char* file,int line,int type)
 {
 	size+=sizeof(memHeader);
-	printf("size to malloc: %d\n",size);
 	if(size>MEM_PROT)
 	{
 		//cannot address that much
@@ -323,9 +322,10 @@ void* myallocate(size_t size,char* file,int line,int type)
 	}
 	if(meminit==0)
 	{
+		meminit=1;
 		mem=(char*)memalign(sysconf(_SC_PAGE_SIZE),MEM_SIZE);
 		printf("mem:%p - %p\n",mem,mem+MEM_SIZE);
-		printf("header size:%lu,0x%X\n",sizeof(memHeader),(int)sizeof(memHeader));	
+		//printf("header size:%lu,0x%X\n",sizeof(memHeader),(int)sizeof(memHeader));	
 		sa.sa_flags=SA_SIGINFO;
 		sigemptyset(&sa.sa_mask);
 		sa.sa_sigaction=handler;
@@ -364,7 +364,6 @@ void* myallocate(size_t size,char* file,int line,int type)
 		my_pthread_mutex_init(&mem_lock,NULL);
 		my_pthread_mutex_init(&shalloc_lock,NULL);
 		my_pthread_mutex_init(&free_lock,NULL);
-		meminit=1;
 	}
 	if(mprotect(mem+MEM_STRT,MEM_PROT,PROT_NONE)==-1)//want sig handler to put things in place for us
 	{
@@ -747,7 +746,7 @@ void* myallocate(size_t size,char* file,int line,int type)
 			memcpy(mem,&new,sizeof(memHeader));
 			memcpy(mem+size,&rest,sizeof(memHeader));
 			sysinit=1;
-			printf("ptr given from %p - %p\n",mem,mem+size);
+		//	printf("ptr given from %p - %p\n",mem,mem+size);
 			return ((void*)(mem+sizeof(memHeader)));
 		}
 		char* ptr=mem;
@@ -767,7 +766,6 @@ void* myallocate(size_t size,char* file,int line,int type)
 			}
 			ptr=((memHeader*)ptr)->next;
 		}
-printf("BEST: %p\n",bestPtr);
 		if(bestPtr!=NULL)
 		{
 			bestPtr->free=0;
@@ -781,7 +779,7 @@ printf("BEST: %p\n",bestPtr);
 				bestPtr->next=((char*)bestPtr)+(signed)size;
 				memcpy(bestPtr->next,&rest,sizeof(memHeader));
 			}
-			printf("ptr given from %p - %p\n",bestPtr,(char*)bestPtr+(signed)size);
+//			printf("ptr given from %p - %p\n",bestPtr,(char*)bestPtr+(signed)size);
 			return ((void*)(((char*)bestPtr)+sizeof(memHeader)));
 		}
 		return NULL; //memory is full
@@ -790,7 +788,7 @@ printf("BEST: %p\n",bestPtr);
 
 void coalesce(char* ptr,int type,int has)
 {
-	printf("-coal(%p)\n",ptr);
+//	printf("-coal(%p)\n",ptr);
 	memHeader* nxt=(memHeader*)((memHeader*)ptr)->next;
 	memHeader* prv=(memHeader*)((memHeader*)ptr)->prev;
 	if(type==2)
@@ -798,7 +796,7 @@ void coalesce(char* ptr,int type,int has)
 		//shalloc
 		if(prv==NULL&&(char*)nxt!=mem+SHALLOC_END*sysconf(_SC_PAGE_SIZE))//on left edge
 		{
-			printf("-b\n");
+//			printf("-b\n");
 			if(nxt->free!=0)
 			{
 				((memHeader*)ptr)->next=nxt->next;
@@ -808,7 +806,7 @@ void coalesce(char* ptr,int type,int has)
 		}
 		else if((char*)nxt==mem+SHALLOC_END*sysconf(_SC_PAGE_SIZE)&&prv!=NULL)//on right edge
 		{
-			printf("-c\n");
+//			printf("-c\n");
 			if(prv->free!=0)
 			{
 				prv->next=((memHeader*)ptr)->next;
@@ -819,17 +817,17 @@ void coalesce(char* ptr,int type,int has)
 		}
 		else if(prv!=NULL&&(char*)nxt!=mem+SHALLOC_END*sysconf(_SC_PAGE_SIZE))//in middle
 		{
-			printf("-d\n");
+//			printf("-d\n");
 			if(nxt->free!=0||prv->free!=0)
 			{
 				if(nxt->free!=0)
 				{
-					printf("d1\n");
+//					printf("d1\n");
 					((memHeader*)ptr)->next=nxt->next;
 				}
 				if(prv->free!=0)
 				{
-					printf("d2\n");
+//					printf("d2\n");
 					prv->next=((memHeader*)ptr)->next;
 					nxt->prev=((memHeader*)ptr)->prev;	
 					ptr=(char*)prv;
@@ -868,12 +866,12 @@ void coalesce(char* ptr,int type,int has)
 			{
 				if(nxt->free!=0)
 				{
-					printf("d1\n");
+//					printf("d1\n");
 					((memHeader*)ptr)->next=nxt->next;
 				}
 				if(prv->free!=0)
 				{
-					printf("d2\n");
+//					printf("d2\n");
 					prv->next=((memHeader*)ptr)->next;
 					nxt->prev=((memHeader*)ptr)->prev;	
 					ptr=(char*)prv;
@@ -887,14 +885,14 @@ void coalesce(char* ptr,int type,int has)
 	{
 		//usr
 		char* pgEnd=mem+(BOOK_STRT+has)*sysconf(_SC_PAGE_SIZE);
-		printf("pgEnd: %p,has=%d\n",pgEnd,has);
+//		printf("pgEnd: %p,has=%d\n",pgEnd,has);
 		if(ptr==pgEnd)
 		{
 			return;
 		}
 		if(prv==NULL&&(char*)nxt!=pgEnd)//on left edge
 		{
-			printf("-b and %p!=%p\n",nxt,pgEnd);
+//			printf("-b and %p!=%p\n",nxt,pgEnd);
 			if(nxt->free!=0)
 			{
 				((memHeader*)ptr)->next=nxt->next;
@@ -905,7 +903,7 @@ void coalesce(char* ptr,int type,int has)
 		}
 		else if(prv!=NULL&&(char*)nxt==pgEnd)//on right edge
 		{
-			printf("-c\n");
+//			printf("-c\n");
 			if(prv->free!=0)
 			{
 				prv->next=((memHeader*)ptr)->next;
@@ -916,17 +914,17 @@ void coalesce(char* ptr,int type,int has)
 		}
 		else if(prv!=NULL&&(char*)nxt!=pgEnd)//in middle
 		{
-			printf("-d\n");
+//			printf("-d\n");
 			if(nxt->free!=0||prv->free!=0)
 			{
 				if(nxt->free!=0)
 				{
-					printf("d1\n");
+//					printf("d1\n");
 					((memHeader*)ptr)->next=nxt->next;
 				}
 				if(prv->free!=0)
 				{
-					printf("d2\n");
+//					printf("d2\n");
 					prv->next=((memHeader*)ptr)->next;
 					nxt->prev=((memHeader*)ptr)->prev;	
 					ptr=(char*)prv;
@@ -940,8 +938,9 @@ void coalesce(char* ptr,int type,int has)
 
 void mydeallocate(void* ptr_to_mem,char* file,int line,int type)
 {
+	my_pthread_mutex_lock(&free_lock);
 	char* ptr=(char*)ptr_to_mem;
-	printf("-dealoc\n");
+//	printf("-dealoc\n");
 	memHeader* real=((memHeader*)(ptr-sizeof(memHeader)));
 	//printf("ver=%d\n",real->verify);
 	char* check=(char*)real;
@@ -973,12 +972,13 @@ void mydeallocate(void* ptr_to_mem,char* file,int line,int type)
 		}
 
 	}
-	printf("in dealloc %p - %p\n", real, real->next);
-	printf("next next = %p\n",((memHeader*)(real->next))->next);
+//	printf("in dealloc %p - %p\n", real, real->next);
+//	printf("next next = %p\n",((memHeader*)(real->next))->next);
 	//printf(">%lu\n",((char*)real-mem)/sysconf(_SC_PAGE_SIZE));
 	if(real->verify!=VER)
 	{
-		printf("ERROR: Not pointing to void addr\n");
+		//printf("ERROR: Not pointing to void addr\n");
+		my_pthread_mutex_unlock(&free_lock);
 		return;
 	}
 	if(type==1)
@@ -993,17 +993,18 @@ void mydeallocate(void* ptr_to_mem,char* file,int line,int type)
 			id=curr->tid;
 		}
 		if(segments[((char*)real-mem)/sysconf(_SC_PAGE_SIZE)].tid!=id)
-		printf("ERROR: You do not own this memory\n");
-		return;
+		{
+			my_pthread_mutex_unlock(&free_lock);
+		}
 	}
 	real->free=1;
 	coalesce(ptr-sizeof(memHeader),type,has);
 	if(mprotect(mem+MEM_STRT,MEM_PROT,PROT_NONE)==-1)
 	{
-		printf("ERROR: Memory protection failure\n");
-
+		perror("ERROR: ");
 		exit(1);
 	}
+	my_pthread_mutex_unlock(&free_lock);
 	return;
 }
 
@@ -1207,7 +1208,6 @@ void clean() //still need to setup context
 int my_pthread_create(my_pthread_t* thread, pthread_attr_t* attr, void*(*function)(void*), void * arg)
 {
 //	printf("--create\n");
-printf("tcb=%lu\n",sizeof(tcb));
 	if(ptinit==0)
 	{
 		//init stuff
@@ -1221,7 +1221,7 @@ printf("tcb=%lu\n",sizeof(tcb));
 		}
 		if(getcontext(&ctx_main)==-1)
 		{
-			printf("ERROR: Failed to get context for main\n");
+		//	printf("ERROR: Failed to get context for main\n");
 			return 1;
 		}
 		tcb* maint=(tcb*)myallocate(sizeof(tcb),__FILE__,__LINE__,0);
@@ -1247,7 +1247,7 @@ printf("tcb=%lu\n",sizeof(tcb));
 		//set up scheduler thread/context
 		if(getcontext(&ctx_sched)==-1)
 		{
-			printf("ERROR: Failed to get context for scheduler\n");
+		//	printf("ERROR: Failed to get context for scheduler\n");
 			return 1;
 		}
 		ctx_sched.uc_link=0;
@@ -1278,16 +1278,16 @@ printf("tcb=%lu\n",sizeof(tcb));
 	}
 	if(activeThreads==MAX_THREAD)
 	{
-		printf("ERROR: Maximum amount of threads are made, could not make new one\n");
+		//printf("ERROR: Maximum amount of threads are made, could not make new one\n");
 		return 1;
 	}
 	ucontext_t ctx_func;
 	if(getcontext(&ctx_func)==-1)
 	{
-		printf("ERROR: Failed to get context for new thread\n");
+		//printf("ERROR: Failed to get context for new thread\n");
 		return 1;
 	}
-	ctx_func.uc_link=&curr->context;  //i think ************************
+	ctx_func.uc_link=&curr->context;
 	ctx_func.uc_stack.ss_sp=(void*)myallocate(MAX_STACK,__FILE__,__LINE__,0);
 	ctx_func.uc_stack.ss_size=MAX_STACK;
 	tcb* t=(tcb*)myallocate(sizeof(tcb),__FILE__,__LINE__,0);
@@ -1332,7 +1332,6 @@ printf("tcb=%lu\n",sizeof(tcb));
 int my_pthread_yield()
 {
 //	printf("--yield\n");
-	fflush(stdout);
 	curr->priority = PRIORITY_LEVELS-1;
 	swapcontext(&curr->context,&ctx_sched);
 }
@@ -1427,6 +1426,8 @@ int my_pthread_join(my_pthread_t thread, void **value_ptr)
 				if(segments[i].tid==thread)
 				{
 					segments[i].used=0;
+					segments[i].tid=-1;
+					segments[i].pageNum=-1;
 				}
 			}
 			for(i=0;i<SWAP_END;i++)
@@ -1434,6 +1435,8 @@ int my_pthread_join(my_pthread_t thread, void **value_ptr)
 				if(swap[i].tid==thread)
 				{
 					swap[i].used=0;
+					swap[i].tid=-1;
+					swap[i].pageNum=-1;
 				}
 			}
 			return 0;
