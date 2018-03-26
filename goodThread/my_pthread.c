@@ -30,8 +30,8 @@
 #define MAINTENANCE 10 //not sure a good value
 #define PRIORITY_LEVELS 5 //not sure good value
 //for mem manager
-#define malloc(x) myallocate(x,__FILE__,__LINE__,1);
-#define free(x) mydeallocate(x,__FILE__,__LINE__,1);
+#define malloc(x) myallocate(x,__FILE__,__LINE__,0)
+#define free(x)mydeallocate(x,__FILE__,__LINE__,0)
 #define VER 987
 #define MEM_SIZE 8388608 //8MB = 2^23 (2048 pgs)
 #define MEM_STRT 2510848 //first page offset of non-system memory
@@ -62,6 +62,7 @@ memBook swap[4096]={0}; //metadata about swap
 int swapfd; //swap file descriptor
 my_pthread_mutex_t mem_lock;
 my_pthread_mutex_t shalloc_lock;
+my_pthread_mutex_t free_lock;
 
 /////////////////////////////////////////////////////////////////////////////
 //									   //
@@ -75,11 +76,20 @@ static void handler(int signum,siginfo_t* si,void* unused)
 	//assuming sys is not protected (since always loaded and will slow sched if protected)
 	if(addr>=mem&&addr<=mem+MEM_SIZE)
 	{
+		my_pthread_t id;
 		//printf("(sh) my bad...\n");
+		if(curr==NULL)
+		{
+			id=0;
+		}
+		else
+		{
+			id=curr->tid;
+		}
 		fflush(stdout);
 		int loc=(addr-mem)/sysconf(_SC_PAGE_SIZE);//page number of fault	
 		int find=loc-BOOK_STRT;//which of its pages thread wanted
-		if(segments[loc].tid==curr->tid&&segments[loc].pageNum==find)//page is already there
+		if(segments[loc].tid==id&&segments[loc].pageNum==find)//page is already there
 		{
 			if(mprotect(mem+loc*sysconf(_SC_PAGE_SIZE),sysconf(_SC_PAGE_SIZE),PROT_READ|PROT_WRITE)==-1)
 			{
@@ -98,7 +108,7 @@ static void handler(int signum,siginfo_t* si,void* unused)
 		}
 		for(i=BOOK_STRT;i<BOOK_END;i++)
 		{
-			if(segments[i].tid==curr->tid&&segments[i].pageNum==find)
+			if(segments[i].tid==id&&segments[i].pageNum==find)
 			{
 				//printf("(sh) found it b/c id=%d\n",segments[i].tid);
 				//move whats in i to loc
@@ -125,7 +135,7 @@ static void handler(int signum,siginfo_t* si,void* unused)
 		//look in swap for it
 		for(i=0;i<SWAP_END;i++)
 		{
-			if(swap[i].tid==curr->tid&&swap[i].pageNum==find)
+			if(swap[i].tid==id&&swap[i].pageNum==find)
 			{
 				//find a page to evict
 				//naive and choose the one in its spot
@@ -240,6 +250,7 @@ void* shalloc(size_t size)
 		}
 		my_pthread_mutex_init(&mem_lock,NULL);
 		my_pthread_mutex_init(&shalloc_lock,NULL);
+		my_pthread_mutex_init(&free_lock,NULL);
 	}
 	my_pthread_mutex_lock(&shalloc_lock);
 	if(shinit==0)
@@ -303,8 +314,8 @@ void* shalloc(size_t size)
 
 void* myallocate(size_t size,char* file,int line,int type)
 {
-	
 	size+=sizeof(memHeader);
+	printf("size to malloc: %d\n",size);
 	if(size>MEM_PROT)
 	{
 		//cannot address that much
@@ -352,6 +363,7 @@ void* myallocate(size_t size,char* file,int line,int type)
 		}
 		my_pthread_mutex_init(&mem_lock,NULL);
 		my_pthread_mutex_init(&shalloc_lock,NULL);
+		my_pthread_mutex_init(&free_lock,NULL);
 		meminit=1;
 	}
 	if(mprotect(mem+MEM_STRT,MEM_PROT,PROT_NONE)==-1)//want sig handler to put things in place for us
@@ -359,8 +371,19 @@ void* myallocate(size_t size,char* file,int line,int type)
 		perror("ERROR: ");
 		exit(EXIT_FAILURE);
 	}
+
 	if(type!=0)
 	{
+		my_pthread_t id;
+		if(curr==NULL)
+		{
+			//called malloc before a thread was made
+			id=0;
+		}
+		else
+		{
+			id=curr->tid;
+		}
 		my_pthread_mutex_lock(&mem_lock);
 		double num=((double)(size+sizeof(memHeader)))/sysconf(_SC_PAGE_SIZE);//extra memHeader for end of mem chunk
 		if(num-(int)num!=0)
@@ -371,7 +394,7 @@ void* myallocate(size_t size,char* file,int line,int type)
 		int i,has=0;
 		for(i=BOOK_STRT;i<BOOK_END;i++)
 		{
-			if(segments[i].tid==curr->tid&&segments[i].used!=0) //change to curr->tid
+			if(segments[i].tid==id&&segments[i].used!=0)
 			{
 				has++;
 			}
@@ -424,13 +447,13 @@ void* myallocate(size_t size,char* file,int line,int type)
 				}
 				for(i=0;i<pgCount;i++)
 				{
-					segments[pgList[i]].tid=curr->tid;
+					segments[pgList[i]].tid=id;
 					segments[pgList[i]].pageNum=i;
 					segments[pgList[i]].used=1;
 				}
 				for(i=0;i<swapCount;i++)
 				{
-					swap[swapList[i]].tid=curr->tid;
+					swap[swapList[i]].tid=id;
 					swap[swapList[i]].pageNum=pgCount+i;
 					swap[swapList[i]].used=1;
 				}
@@ -450,7 +473,7 @@ void* myallocate(size_t size,char* file,int line,int type)
 			}
 			for(i=0;i<pgReq;i++)
 			{
-				segments[pgList[i]].tid=curr->tid; //change to curr->id
+				segments[pgList[i]].tid=id;
 				segments[pgList[i]].pageNum=i;
 				segments[pgList[i]].used=1;
 			}
@@ -570,13 +593,13 @@ void* myallocate(size_t size,char* file,int line,int type)
 					}
 					for(i=0;i<newCount;i++)
 					{
-						segments[newList[i]].tid=curr->tid;
+						segments[newList[i]].tid=id;
 						segments[newList[i]].pageNum=has+i;
 						segments[newList[i]].used=1;
 					}
 					for(i=0;i<swapCount;i++)
 					{
-						swap[swapList[i]].tid=curr->tid;
+						swap[swapList[i]].tid=id;
 						swap[swapList[i]].pageNum=has+newCount+i;
 						swap[swapList[i]].used=1;
 					}
@@ -593,7 +616,7 @@ void* myallocate(size_t size,char* file,int line,int type)
 				}
 				for(i=0;i<newReq;i++)
 				{
-					segments[newList[i]].tid=curr->tid;
+					segments[newList[i]].tid=id;
 					segments[newList[i]].pageNum=has+i;
 					segments[newList[i]].used=1;
 				}
@@ -660,13 +683,13 @@ void* myallocate(size_t size,char* file,int line,int type)
 					}
 					for(i=0;i<pgCount;i++)
 					{
-						segments[pgList[i]].tid=curr->tid;
+						segments[pgList[i]].tid=id;
 						segments[pgList[i]].pageNum=has+i;
 						segments[pgList[i]].used=1;
 					}
 					for(i=0;i<swapCount;i++)
 					{
-						swap[swapList[i]].tid=curr->tid;
+						swap[swapList[i]].tid=id;
 						swap[swapList[i]].pageNum=has+pgCount+i;
 						swap[swapList[i]].used=1;
 					}
@@ -686,7 +709,7 @@ void* myallocate(size_t size,char* file,int line,int type)
 				}
 				for(i=0;i<pgCount;i++)
 				{
-					segments[i].tid=curr->tid; //chnge to curr->id
+					segments[i].tid=id;
 					segments[i].pageNum=has+i;
 					segments[i].used=1;
 				}
@@ -708,7 +731,6 @@ void* myallocate(size_t size,char* file,int line,int type)
 	}
 	else //sys req for mem
 	{
-		//just like shalloc
 		if(sysinit==0)
 		{
 			memHeader new,rest;
@@ -725,6 +747,7 @@ void* myallocate(size_t size,char* file,int line,int type)
 			memcpy(mem,&new,sizeof(memHeader));
 			memcpy(mem+size,&rest,sizeof(memHeader));
 			sysinit=1;
+			printf("ptr given from %p - %p\n",mem,mem+size);
 			return ((void*)(mem+sizeof(memHeader)));
 		}
 		char* ptr=mem;
@@ -744,6 +767,7 @@ void* myallocate(size_t size,char* file,int line,int type)
 			}
 			ptr=((memHeader*)ptr)->next;
 		}
+printf("BEST: %p\n",bestPtr);
 		if(bestPtr!=NULL)
 		{
 			bestPtr->free=0;
@@ -754,9 +778,10 @@ void* myallocate(size_t size,char* file,int line,int type)
 				rest.verify=VER;
 				rest.prev=(char*)bestPtr;
 				rest.next=bestPtr->next;
-				bestPtr->next=((char*)bestPtr)+size;
+				bestPtr->next=((char*)bestPtr)+(signed)size;
 				memcpy(bestPtr->next,&rest,sizeof(memHeader));
 			}
+			printf("ptr given from %p - %p\n",bestPtr,(char*)bestPtr+(signed)size);
 			return ((void*)(((char*)bestPtr)+sizeof(memHeader)));
 		}
 		return NULL; //memory is full
@@ -928,10 +953,20 @@ void mydeallocate(void* ptr_to_mem,char* file,int line,int type)
 	int has=0;
 	if(type==1)
 	{
+		my_pthread_t id;
+		if(curr==NULL)
+		{
+			//no threads made yet
+			id=0;//set to would be id of main context id
+		}
+		else
+		{
+			id=curr->tid;
+		}
 		int i;
 		for(i=BOOK_STRT;i<BOOK_END;i++)
 		{
-			if(segments[i].tid==curr->tid&&segments[i].used!=0)//change to curr->id
+			if(segments[i].tid==id&&segments[i].used!=0)//change to curr->id
 			{
 				has++;
 			}
@@ -946,8 +981,18 @@ void mydeallocate(void* ptr_to_mem,char* file,int line,int type)
 		printf("ERROR: Not pointing to void addr\n");
 		return;
 	}
-	if(type!=0&&segments[((char*)real-mem)/sysconf(_SC_PAGE_SIZE)].tid!=curr->tid)//will be changed to look at memBook
+	if(type==1)
 	{
+		my_pthread_t id;
+		if(curr==NULL)
+		{
+			id=0;
+		}
+		else
+		{
+			id=curr->tid;
+		}
+		if(segments[((char*)real-mem)/sysconf(_SC_PAGE_SIZE)].tid!=id)
 		printf("ERROR: You do not own this memory\n");
 		return;
 	}
@@ -956,6 +1001,7 @@ void mydeallocate(void* ptr_to_mem,char* file,int line,int type)
 	if(mprotect(mem+MEM_STRT,MEM_PROT,PROT_NONE)==-1)
 	{
 		printf("ERROR: Memory protection failure\n");
+
 		exit(1);
 	}
 	return;
@@ -995,7 +1041,8 @@ void wrapper(int f1,int f2,int a1,int a2)
 
 void alarm_handler(int signum)
 {
-	//printf("===ALARM=== (mode=%d)\n",mode);
+	printf("===ALARM=== (mode=%d)\n",mode);
+	fflush(stdout);
 	if(mode==0)
 	{
 		return;
@@ -1160,6 +1207,7 @@ void clean() //still need to setup context
 int my_pthread_create(my_pthread_t* thread, pthread_attr_t* attr, void*(*function)(void*), void * arg)
 {
 //	printf("--create\n");
+printf("tcb=%lu\n",sizeof(tcb));
 	if(ptinit==0)
 	{
 		//init stuff
@@ -1381,7 +1429,7 @@ int my_pthread_join(my_pthread_t thread, void **value_ptr)
 					segments[i].used=0;
 				}
 			}
-			for(i=0;i<SWAP_SIZE;i++)
+			for(i=0;i<SWAP_END;i++)
 			{
 				if(swap[i].tid==thread)
 				{
@@ -1422,7 +1470,6 @@ int my_pthread_mutex_init(my_pthread_mutex_t *mutex, const pthread_mutexattr_t *
 {
 
 //	printf("mutex_init\n");
-	//from my understanding, the user is passing in a pointer to a my_pthread_mutex_t object, which is a struct pointer?
 	if (mutexList == NULL)
 	{
 		mutexList =  mutex;
@@ -1535,10 +1582,11 @@ int my_pthread_mutex_destroy(my_pthread_mutex_t *mutex)
 		printf("ERROR: Attempting to destroy LOCKED mutex\n");
 		return 1;
 	}
-
 	//change status to "destroyed" and remove from mutexList
 	mutex->locked = 2;
+	return 0;
 	my_pthread_mutex_t *prev, *ptr;
+	printf("ml@ %p\n",mutexList);
 	ptr = mutexList;
 	while (ptr->next != NULL)
 	{
@@ -1546,13 +1594,18 @@ int my_pthread_mutex_destroy(my_pthread_mutex_t *mutex)
 		{
 			if (prev == NULL)
 			{
+				printf("half way**************\n");
 				mutexList = mutex->next;
 				mutex->next = NULL;
-			}else{
-				prev->next = mutex->next;
-				mutex->next = NULL;
 			}
-		}else{
+			else
+			{
+				printf("prev=%p mutex=%p\n",prev->next,mutex->next);
+				prev->next = mutex->next;
+			}
+		}
+
+		else{
 			prev = ptr;
 			ptr = ptr->next;
 		}

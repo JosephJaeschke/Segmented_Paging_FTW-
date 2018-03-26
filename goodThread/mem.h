@@ -12,7 +12,7 @@ typedef struct memHeader_
 
 typedef struct memBook_
 {
-	int tid;
+	my_pthread_t tid;
 	int pageNum;//first,second,... page of the thread so we know where to put it
 	int used:1;
 } memBook;

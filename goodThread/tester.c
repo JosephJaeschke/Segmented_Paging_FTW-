@@ -9,12 +9,20 @@ void* fun()
 	printf("In fun\n");
 	int a=4;
 	int* ret=&a;
-	a=123;
+	char* str=malloc(100);
 	int i=0;
+	for(i=0;i<100;i++)
+	{
+		str[i]='a';
+	}
+	str[99]='\0';
+	a=123;
+	i=0;
 	while(i<999999999)
 	{
 		i=i+1;
 	}
+	printf("I can print %s\n",str);
 	printf("done being busy\n");
 	pthread_exit((void*)ret);
 }
