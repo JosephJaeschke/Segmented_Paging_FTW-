@@ -63,6 +63,12 @@ int swapfd; //swap file descriptor
 my_pthread_mutex_t mem_lock;
 my_pthread_mutex_t shalloc_lock;
 my_pthread_mutex_t free_lock;
+my_pthread_mutex_t join_lock;
+my_pthread_mutex_t create_lock;
+my_pthread_mutex_t exit_lock;
+my_pthread_mutex_t yield_lock;
+
+
 
 /////////////////////////////////////////////////////////////////////////////
 //									   //
@@ -1274,17 +1280,26 @@ int my_pthread_create(my_pthread_t* thread, pthread_attr_t* attr, void*(*functio
 		timer.it_value.tv_usec=25000; 
 		setitimer(ITIMER_REAL,&timer,NULL);
 //		printf("--timer set\n");
+		my_pthread_mutex_init(&join_lock,NULL);
+		my_pthread_mutex_init(&exit_lock,NULL);
+		my_pthread_mutex_init(&create_lock,NULL);
+		my_pthread_mutex_init(&yield_lock,NULL);
 		ptinit=1;
 	}
+
+	
+	my_pthread_mutex_lock(&create_lock);
 	if(activeThreads==MAX_THREAD)
 	{
 		//printf("ERROR: Maximum amount of threads are made, could not make new one\n");
+		my_pthread_mutex_unlock(&create_lock);
 		return 1;
 	}
 	ucontext_t ctx_func;
 	if(getcontext(&ctx_func)==-1)
 	{
 		//printf("ERROR: Failed to get context for new thread\n");
+		my_pthread_mutex_unlock(&create_lock);
 		return 1;
 	}
 	ctx_func.uc_link=&curr->context;
@@ -1325,6 +1340,7 @@ int my_pthread_create(my_pthread_t* thread, pthread_attr_t* attr, void*(*functio
 	}
 //	printf("--added to queue, id %u\n",t->tid);
 	activeThreads++;
+	my_pthread_mutex_unlock(&create_lock);
 	return 0;
 }
 
@@ -1339,10 +1355,13 @@ int my_pthread_yield()
 /* terminate a thread */
 void my_pthread_exit(void* value_ptr)
 {
+
+	my_pthread_mutex_lock(&exit_lock);
 //	printf("--exit\n");
 	if(value_ptr==NULL)
 	{
 		printf("ERROR: value_ptr is NULL\n");
+		my_pthread_mutex_unlock(&exit_lock);
 		return;
 	}
 	//mark thread as terminating
@@ -1383,6 +1402,7 @@ void my_pthread_exit(void* value_ptr)
 	//set value_ptr to retVal of terminating thread?
 	curr->retVal=value_ptr;
 	//yield thread
+	my_pthread_mutex_unlock(&exit_lock);
 	my_pthread_yield();
 	return;
 }
@@ -1390,6 +1410,8 @@ void my_pthread_exit(void* value_ptr)
 /* wait for thread termination */
 int my_pthread_join(my_pthread_t thread, void **value_ptr)
 {
+
+	my_pthread_mutex_lock(&join_lock);
 //	printf("--join\n");
 	//mark thread as waiting
 	curr->state=5;
@@ -1439,6 +1461,7 @@ int my_pthread_join(my_pthread_t thread, void **value_ptr)
 					swap[i].pageNum=-1;
 				}
 			}
+			my_pthread_mutex_unlock(&join_lock);
 			return 0;
 		}
 		else//thread is not first in list
@@ -1459,13 +1482,18 @@ int my_pthread_join(my_pthread_t thread, void **value_ptr)
 					mydeallocate(ptr->context.uc_stack.ss_sp,__FILE__,__LINE__,0);
 					mydeallocate(ptr,__FILE__,__LINE__,0);
 					activeThreads--;
+					my_pthread_mutex_unlock(&join_lock);
 					return 0;
 				}
+				prev = ptr;
 				ptr=ptr->nxt;
 			}
 		}
+		
+		my_pthread_mutex_unlock(&join_lock);
 		my_pthread_yield();
 	}
+	my_pthread_mutex_unlock(&join_lock);
 	return 0;
 }
 /* initial the mutex lock */
