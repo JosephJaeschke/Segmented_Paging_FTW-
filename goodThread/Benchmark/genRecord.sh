@@ -8,7 +8,7 @@ fi
 
 while [ $ITER -lt 10 ]; do
 	let "COUNTER=0"
-	while [ $COUNTER -lt 10 ]; do
+	while [ $COUNTER -lt 1000 ]; do
 		echo $(( $RANDOM % 65535)) >> ./record/$ITER
 		let "COUNTER+=1"
 	done

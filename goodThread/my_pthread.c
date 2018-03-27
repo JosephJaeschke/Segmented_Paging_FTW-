@@ -1167,6 +1167,7 @@ void scheduler()
 		timer.it_value.tv_usec=(curr->priority+1)*25000;
 		setitimer(ITIMER_REAL,&timer,NULL);
 		mode=1;
+		printf("scheduled thread %d\n", curr->tid);
 		swapcontext(&ctx_sched,&curr->context);
 	}
 	return;
@@ -1403,6 +1404,7 @@ void my_pthread_exit(void* value_ptr)
 	curr->retVal=value_ptr;
 	//yield thread
 	my_pthread_mutex_unlock(&exit_lock);
+	printf("Thread %d yielding from exit\n", curr->tid);
 	my_pthread_yield();
 	return;
 }
@@ -1479,6 +1481,7 @@ int my_pthread_join(my_pthread_t thread, void **value_ptr)
 						double** temp=(double**)value_ptr;
 						*temp=ptr->retVal;
 					}
+					printf("Thread %d has been successfully waited on by Thread %d\n", (int) thread, curr->tid);
 					mydeallocate(ptr->context.uc_stack.ss_sp,__FILE__,__LINE__,0);
 					mydeallocate(ptr,__FILE__,__LINE__,0);
 					activeThreads--;
@@ -1490,7 +1493,9 @@ int my_pthread_join(my_pthread_t thread, void **value_ptr)
 			}
 		}
 		
+		printf("Thread %d not found in terminating list, waited on by Thread %d\n", (int) thread, curr->tid);
 		my_pthread_mutex_unlock(&join_lock);
+		printf("Thread %d yielding from join\n", curr->tid);
 		my_pthread_yield();
 	}
 	my_pthread_mutex_unlock(&join_lock);
@@ -1564,7 +1569,7 @@ int my_pthread_mutex_lock(my_pthread_mutex_t *mutex)
 			}
 			ptr->nxt = curr;
 		}
-	//	printf("mutex placed curr at end of waiting queue! ready to yield\n");
+		printf("Thread %d yielding from mutex lock\n", curr->tid);
 		my_pthread_yield();
 	}
 	if (lockStatus == 2){
