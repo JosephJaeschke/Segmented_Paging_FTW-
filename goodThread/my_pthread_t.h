@@ -21,6 +21,10 @@
 #define pthread_mutex_unlock(x) my_pthread_mutex_unlock(x)
 #define pthread_mutex_destroy(x) my_pthread_mutex_destroy(x)
 
+//for memory manager
+#define malloc(x) myallocate(x,__FILE__,__LINE__,0)
+#define free(x) mydeallocate(x,__FILE__,__LINE__,0)
+
 
 /* include lib header files that you need here: */
 #include <unistd.h>

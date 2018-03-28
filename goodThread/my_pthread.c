@@ -29,8 +29,6 @@
 #define MAINTENANCE 10 //not sure a good value
 #define PRIORITY_LEVELS 5 //not sure good value
 //for mem manager
-#define malloc(x) myallocate(x,__FILE__,__LINE__,0)
-#define free(x) mydeallocate(x,__FILE__,__LINE__,0)
 #define VER 987
 #define MEM_SIZE 8388608 //8MB = 2^23 (2048 pgs)
 #define MEM_STRT 2510848 //first page offset of non-system memory
