@@ -13,7 +13,6 @@
 #include <sys/time.h>
 #include <unistd.h>
 //for mem manager
-#include "mem.h"
 #include <stdio.h>
 #include <string.h>
 #include <malloc.h>
