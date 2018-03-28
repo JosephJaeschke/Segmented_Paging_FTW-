@@ -22,19 +22,27 @@
 #define pthread_mutex_destroy(x) my_pthread_mutex_destroy(x)
 
 //for memory manager
-#define malloc(x) myallocate(x,__FILE__,__LINE__,0)
-#define free(x) mydeallocate(x,__FILE__,__LINE__,0)
-
 
 /* include lib header files that you need here: */
-#include <unistd.h>
-#include <sys/syscall.h>
-#include <sys/types.h>
-#include <sys/time.h>
-#include <stdio.h>
-#include <stdlib.h>
 #include <ucontext.h>
+#include <stdlib.h>
 #include <signal.h>
+#include <sys/time.h>
+#include <sys/syscall.h>
+#include <unistd.h>
+//for mem manager
+#include <stdio.h>
+#include <string.h>
+#include <malloc.h>
+#include <assert.h>
+#include <sys/mman.h>
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <fcntl.h>
+#include <limits.h> 
+
+#define malloc(x) myallocate(x,__FILE__,__LINE__,0)
+#define free(x) mydeallocate(x,__FILE__,__LINE__,0)
 
 typedef uint my_pthread_t;
 

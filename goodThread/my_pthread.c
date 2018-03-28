@@ -7,21 +7,7 @@
 // iLab Server: cray1
 
 #include "my_pthread_t.h"
-#include "ucontext.h"
-#include <stdlib.h>
-#include <signal.h>
-#include <sys/time.h>
-#include <unistd.h>
-//for mem manager
-#include <stdio.h>
-#include <string.h>
-#include <malloc.h>
-#include <assert.h>
-#include <sys/mman.h>
-#include <sys/types.h>
-#include <sys/stat.h>
-#include <fcntl.h>
-#include <limits.h> 
+
 
 #define MAX_STACK 65536 //my TA told someone that 32k is a good number
 #define MAX_THREAD 32 //TA said a power of 2 and referenced 32
