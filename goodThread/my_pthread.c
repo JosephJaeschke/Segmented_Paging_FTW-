@@ -30,7 +30,7 @@
 #define PRIORITY_LEVELS 5 //not sure good value
 //for mem manager
 #define malloc(x) myallocate(x,__FILE__,__LINE__,0)
-#define free(x)mydeallocate(x,__FILE__,__LINE__,0)
+#define free(x) mydeallocate(x,__FILE__,__LINE__,0)
 #define VER 987
 #define MEM_SIZE 8388608 //8MB = 2^23 (2048 pgs)
 #define MEM_STRT 2510848 //first page offset of non-system memory
@@ -168,6 +168,11 @@ static void handler(int signum,siginfo_t* si,void* unused)
 				//put swap contents in mem
 				memcpy(mem+find*sysconf(_SC_PAGE_SIZE),swapData,sysconf(_SC_PAGE_SIZE));
 				//put mem contents in swap
+				if(lseek(swapfd,i*sysconf(_SC_PAGE_SIZE),SEEK_SET)<0)
+				{
+					perror("ERROR: ");
+					exit(1);
+				}
 				int numWrite=0,curWrite=0;
 				while(numWrite<sysconf(_SC_PAGE_SIZE))
 				{
@@ -267,13 +272,13 @@ void* shalloc(size_t size)
 		new.prev=NULL;
 		new.next=mem+SHALLOC_STRT*sysconf(_SC_PAGE_SIZE)+size;
 		new.free=0;
-		if(size>=4*sysconf(_SC_PAGE_SIZE)-sizeof(memHeader))
+		if(size+sizeof(memHeader)<=4*sysconf(_SC_PAGE_SIZE))
 		{
 			memHeader rest;
 			rest.free=1;
 			rest.prev=mem+SHALLOC_STRT*sysconf(_SC_PAGE_SIZE);
 			rest.next=mem+SHALLOC_END*sysconf(_SC_PAGE_SIZE);
-			new.next=mem+SHALLOC_END*sysconf(_SC_PAGE_SIZE)+size;
+			new.next=mem+SHALLOC_STRT*sysconf(_SC_PAGE_SIZE)+size;
 			memcpy(mem+SHALLOC_STRT*sysconf(_SC_PAGE_SIZE)+size,&rest,sizeof(memHeader));
 		}
 		memcpy(mem+SHALLOC_STRT*sysconf(_SC_PAGE_SIZE),&new,sizeof(memHeader));
@@ -286,6 +291,7 @@ void* shalloc(size_t size)
 	while(ptr!=mem+SHALLOC_END*sysconf(_SC_PAGE_SIZE))
 	{
 		int sz;
+printf("%p!=%p\n",ptr,mem+SHALLOC_END*sysconf(_SC_PAGE_SIZE));
 		if(((memHeader*)ptr)->free!=0)
 		{
 			sz=(((memHeader*)ptr)->next)-ptr;	
@@ -378,6 +384,7 @@ void* myallocate(size_t size,char* file,int line,int type)
 
 	if(type!=0)
 	{
+printf("my malloc\n");
 		my_pthread_t id;
 		if(curr==NULL)
 		{
@@ -945,12 +952,13 @@ void mydeallocate(void* ptr_to_mem,char* file,int line,int type)
 {
 	my_pthread_mutex_lock(&free_lock);
 	char* ptr=(char*)ptr_to_mem;
-//	printf("-dealoc\n");
+	printf("-dealoc\n");
 	memHeader* real=((memHeader*)(ptr-sizeof(memHeader)));
 	//printf("ver=%d\n",real->verify);
 	char* check=(char*)real;
 	if((signed)(check-(mem+(SHALLOC_STRT)*sysconf(_SC_PAGE_SIZE)))>=0)
 	{
+printf("shalloc\n");
 		//freeing from shalloc region
 		type++;
 	}
