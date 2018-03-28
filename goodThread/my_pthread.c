@@ -172,7 +172,7 @@ static void handler(int signum,siginfo_t* si,void* unused)
 			}
 		}
 		//couldn't find page, handle as seg fault?
-		printf("(sh) Segmentation fault (couldn't find page)\n");
+		printf("(sh) Segmentation fault (couldn't find page for thread %d)\n",id);
 		exit(EXIT_FAILURE);
 	}
 	else
@@ -205,8 +205,7 @@ void* shalloc(size_t size)
 	{
 		meminit=1;
 		mem=(char*)memalign(sysconf(_SC_PAGE_SIZE),MEM_SIZE);
-		printf("mem:%p - %p\n",mem,mem+MEM_SIZE);
-		printf("header size:%lu,0x%X\n",sizeof(memHeader),(int)sizeof(memHeader));	
+		//printf("mem:%p - %p\n",mem,mem+MEM_SIZE);
 		sa.sa_flags=SA_SIGINFO;
 		sigemptyset(&sa.sa_mask);
 		sa.sa_sigaction=handler;
@@ -275,7 +274,7 @@ void* shalloc(size_t size)
 	while(ptr!=mem+SHALLOC_END*sysconf(_SC_PAGE_SIZE))
 	{
 		int sz;
-printf("%p!=%p\n",ptr,mem+SHALLOC_END*sysconf(_SC_PAGE_SIZE));
+//printf("%p!=%p\n",ptr,mem+SHALLOC_END*sysconf(_SC_PAGE_SIZE));
 		if(((memHeader*)ptr)->free!=0)
 		{
 			sz=(((memHeader*)ptr)->next)-ptr;	
@@ -319,7 +318,7 @@ void* myallocate(size_t size,char* file,int line,int type)
 	{
 		meminit=1;
 		mem=(char*)memalign(sysconf(_SC_PAGE_SIZE),MEM_SIZE);
-		printf("mem:%p - %p\n",mem,mem+MEM_SIZE);
+		//printf("mem:%p - %p\n",mem,mem+MEM_SIZE);
 		//printf("header size:%lu,0x%X\n",sizeof(memHeader),(int)sizeof(memHeader));	
 		sa.sa_flags=SA_SIGINFO;
 		sigemptyset(&sa.sa_mask);
@@ -368,7 +367,6 @@ void* myallocate(size_t size,char* file,int line,int type)
 
 	if(type!=0)
 	{
-printf("my malloc\n");
 		my_pthread_mutex_lock(&mem_lock);
 		my_pthread_t id;
 		if(curr==NULL)
@@ -396,7 +394,6 @@ printf("my malloc\n");
 		}
 		if(has==0)
 		{
-printf("has %d\n",has);
 			//find a free page
 			if(size+sizeof(memHeader)>MEM_PROT)
 			{
@@ -469,7 +466,6 @@ printf("has %d\n",has);
 			}
 			for(i=0;i<pgReq;i++)
 			{
-printf("id=%lu\n",id);
 				segments[pgList[i]].tid=id;
 				segments[pgList[i]].pageNum=i;
 				segments[pgList[i]].used=1;
@@ -938,13 +934,11 @@ void mydeallocate(void* ptr_to_mem,char* file,int line,int type)
 {
 	my_pthread_mutex_lock(&free_lock);
 	char* ptr=(char*)ptr_to_mem;
-	printf("-dealoc\n");
 	memHeader* real=((memHeader*)(ptr-sizeof(memHeader)));
 	//printf("ver=%d\n",real->verify);
 	char* check=(char*)real;
 	if((signed)(check-(mem+(SHALLOC_STRT)*sysconf(_SC_PAGE_SIZE)))>=0)
 	{
-printf("shalloc\n");
 		//freeing from shalloc region
 		type++;
 	}
@@ -1041,7 +1035,7 @@ void wrapper(int f1,int f2,int a1,int a2)
 
 void alarm_handler(int signum)
 {
-	printf("===ALARM=== (mode=%d)\n",mode);
+	//printf("===ALARM=== (mode=%d)\n",mode);
 	fflush(stdout);
 	if(mode==0)
 	{
@@ -1160,7 +1154,7 @@ void scheduler()
 		timer.it_value.tv_usec=(curr->priority+1)*25000;
 		setitimer(ITIMER_REAL,&timer,NULL);
 		mode=1;
-		printf("scheduled thread %d\n", curr->tid);
+		//printf("scheduled thread %d\n", curr->tid);
 		swapcontext(&ctx_sched,&curr->context);
 	}
 	return;
@@ -1168,7 +1162,7 @@ void scheduler()
 
 void maintenance()
 {
-	printf("m\n");
+	//printf("m\n");
 	fflush(stdout);
 	//give all threads priority 0 to prevent starvation
 	int i;
@@ -1397,7 +1391,7 @@ void my_pthread_exit(void* value_ptr)
 	curr->retVal=value_ptr;
 	//yield thread
 	my_pthread_mutex_unlock(&exit_lock);
-	printf("Thread %d yielding from exit\n", curr->tid);
+//	printf("Thread %d yielding from exit\n", curr->tid);
 	my_pthread_yield();
 	return;
 }
@@ -1474,7 +1468,7 @@ int my_pthread_join(my_pthread_t thread, void **value_ptr)
 						double** temp=(double**)value_ptr;
 						*temp=ptr->retVal;
 					}
-					printf("Thread %d has been successfully waited on by Thread %d\n", (int) thread, curr->tid);
+					//printf("Thread %d has been successfully waited on by Thread %d\n", (int) thread, curr->tid);
 					mydeallocate(ptr->context.uc_stack.ss_sp,__FILE__,__LINE__,0);
 					mydeallocate(ptr,__FILE__,__LINE__,0);
 					activeThreads--;
@@ -1486,9 +1480,9 @@ int my_pthread_join(my_pthread_t thread, void **value_ptr)
 			}
 		}
 		
-		printf("Thread %d not found in terminating list, waited on by Thread %d\n", (int) thread, curr->tid);
+//		printf("Thread %d not found in terminating list, waited on by Thread %d\n", (int) thread, curr->tid);
 		my_pthread_mutex_unlock(&join_lock);
-		printf("Thread %d yielding from join\n", curr->tid);
+//		printf("Thread %d yielding from join\n", curr->tid);
 		my_pthread_yield();
 	}
 	my_pthread_mutex_unlock(&join_lock);
@@ -1562,11 +1556,11 @@ int my_pthread_mutex_lock(my_pthread_mutex_t *mutex)
 			}
 			ptr->nxt = curr;
 		}
-		printf("Thread %d yielding from mutex lock\n", curr->tid);
+		//printf("Thread %d yielding from mutex lock\n", curr->tid);
 		my_pthread_yield();
 	}
 	if (lockStatus == 2){
-		printf("ERROR: attempting to lock 'destroyed' mutex\n");
+		//printf("ERROR: attempting to lock 'destroyed' mutex\n");
 		return 1;
 	}
 
@@ -1581,7 +1575,7 @@ int my_pthread_mutex_unlock(my_pthread_mutex_t *mutex)
 	//double check that mutex is not already unlocked (just in case)
 	if(mutex->locked == 0)
 	{
-		printf("ERROR: Attempting to unlock UNLOCKED mutex\n");
+		//printf("ERROR: Attempting to unlock UNLOCKED mutex\n");
 		return 1;
 	}
 

@@ -11,8 +11,8 @@
 
 #define DEFAULT_THREAD_NUM 4
 
-#define C_SIZE 100000
-#define R_SIZE 10000
+#define C_SIZE 10
+#define R_SIZE 10
 
 pthread_mutex_t   mutex;
 
@@ -36,9 +36,9 @@ void parallel_calculate(void* arg) {
 		}
 	}
 	for (j = n; j < R_SIZE; j += thread_num) {
-		pthread_mutex_lock(&mutex);
+//		pthread_mutex_lock(&mutex);
 		sum += pSum[j];
-		pthread_mutex_unlock(&mutex);
+//		pthread_mutex_unlock(&mutex);
 	}
 }
 
@@ -73,17 +73,17 @@ int main(int argc, char **argv) {
 	}
 
 	// initialize counter
-	counter = (int*)malloc(thread_num*sizeof(int));
+	counter = (int*)shalloc(thread_num*sizeof(int));
 	for (i = 0; i < thread_num; ++i)
 		counter[i] = i;
 
 	// initialize pthread_t
-	thread = (pthread_t*)malloc(thread_num*sizeof(pthread_t));
-
+	thread = (pthread_t*)shalloc(thread_num*sizeof(pthread_t));
+	printf("-\n");
 	// initialize data array
 	for (i = 0; i < R_SIZE; ++i)
-		a[i] = (int*)malloc(C_SIZE*sizeof(int));
-
+		a[i] = (int*)shalloc(C_SIZE*sizeof(int));
+	printf("--\n");
 	for (i = 0; i < R_SIZE; ++i)
 		for (j = 0; j < C_SIZE; ++j)
 			a[i][j] = j;
