@@ -26,6 +26,7 @@ int res = 0;
 
 /* A CPU-bound task to do vector multiplication */
 void vector_multiply(void* arg) {
+printf("strt thread\n");
 	int i = 0;
 	int n = *((int*) arg);
 	char* c=(char*)malloc(10);	
@@ -34,8 +35,6 @@ void vector_multiply(void* arg) {
 		res += r[i] * s[i];
 		//pthread_mutex_unlock(&mutex);		
 	}
-printf("BEFORE FREE!!!\n");
-fflush(stdout);
 	free(c);
 }
 
@@ -62,7 +61,7 @@ int main(int argc, char **argv) {
 	}
 
 	// initialize counter
-	counter = (int*)malloc(thread_num*sizeof(int));
+	counter = (int*)shalloc(thread_num*sizeof(int));
 	for (i = 0; i < thread_num; ++i)
 		counter[i] = i;
 

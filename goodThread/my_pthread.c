@@ -369,6 +369,7 @@ void* myallocate(size_t size,char* file,int line,int type)
 	if(type!=0)
 	{
 printf("my malloc\n");
+		my_pthread_mutex_lock(&mem_lock);
 		my_pthread_t id;
 		if(curr==NULL)
 		{
@@ -379,7 +380,6 @@ printf("my malloc\n");
 		{
 			id=curr->tid;
 		}
-		my_pthread_mutex_lock(&mem_lock);
 		double num=((double)(size+sizeof(memHeader)))/sysconf(_SC_PAGE_SIZE);//extra memHeader for end of mem chunk
 		if(num-(int)num!=0)
 		{
@@ -396,6 +396,7 @@ printf("my malloc\n");
 		}
 		if(has==0)
 		{
+printf("has %d\n",has);
 			//find a free page
 			if(size+sizeof(memHeader)>MEM_PROT)
 			{
@@ -468,6 +469,7 @@ printf("my malloc\n");
 			}
 			for(i=0;i<pgReq;i++)
 			{
+printf("id=%lu\n",id);
 				segments[pgList[i]].tid=id;
 				segments[pgList[i]].pageNum=i;
 				segments[pgList[i]].used=1;
