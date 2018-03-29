@@ -56,3 +56,6 @@ dkms.conf
 # specific stuff
 .nfs0000000006c7de5e0000044a
 .nfs0000000006c7de6100000449
+
+#specific mac stuff
+.DS_STORE
