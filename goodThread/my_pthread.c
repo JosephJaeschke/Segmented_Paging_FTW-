@@ -35,7 +35,7 @@ ucontext_t ctx_main, ctx_sched,ctx_clean;
 tcb* curr;
 struct itimerval timer;
 //for mem manager
-char* mem;
+char* mem_man;
 int meminit=0; //has memory been initialized?
 int sysinit=0; //has system used memory yet?
 int shinit=0; //has shalloc been called yet?
@@ -63,7 +63,7 @@ static void handler(int signum,siginfo_t* si,void* unused)
 {
 	char* addr=(char*)si->si_addr;
 	//assuming sys is not protected (since always loaded and will slow sched if protected)
-	if(addr>=mem&&addr<=mem+MEM_SIZE)
+	if(addr>=mem_man&&addr<=mem_man+MEM_SIZE)
 	{
 		my_pthread_t id;
 		//printf("(sh) my bad...\n");
@@ -76,13 +76,14 @@ static void handler(int signum,siginfo_t* si,void* unused)
 			id=curr->tid;
 		}
 		fflush(stdout);
-		int loc=(addr-mem)/sysconf(_SC_PAGE_SIZE);//page number of fault	
+		int loc=(addr-mem_man)/sysconf(_SC_PAGE_SIZE);//page number of fault	
 		int find=loc-BOOK_STRT;//which of its pages thread wanted
 		if(segments[loc].tid==id&&segments[loc].pageNum==find)//page is already there
 		{
-			if(mprotect(mem+loc*sysconf(_SC_PAGE_SIZE),sysconf(_SC_PAGE_SIZE),PROT_READ|PROT_WRITE)==-1)
+			if(mprotect(mem_man+loc*sysconf(_SC_PAGE_SIZE),sysconf(_SC_PAGE_SIZE),PROT_READ|PROT_WRITE)==-1)
 			{
 				//unprotect place
+				printf("mprotect error 1\n");
 				perror("ERROR: ");
 				exit(1);
 			}
@@ -90,8 +91,9 @@ static void handler(int signum,siginfo_t* si,void* unused)
 		}
 		//printf("(sh) %d!=%d and %d!=%d\n",segments[loc].tid,id,segments[loc].pageNum,find);
 		int i;
-		if(mprotect(mem+MEM_STRT,MEM_PROT,PROT_READ|PROT_WRITE)==-1)
+		if(mprotect(mem_man+MEM_STRT,MEM_PROT,PROT_READ|PROT_WRITE)==-1)
 		{
+			printf("mprotect error 2\n");
 			perror("ERROR: ");
 			exit(1);
 		}
@@ -103,18 +105,21 @@ static void handler(int signum,siginfo_t* si,void* unused)
 				//move whats in i to loc
 				memBook temp=segments[i];
 				char dataTemp[sysconf(_SC_PAGE_SIZE)];
-				memcpy(dataTemp,mem+i*sysconf(_SC_PAGE_SIZE),sysconf(_SC_PAGE_SIZE));
+				memcpy(dataTemp,mem_man+i*sysconf(_SC_PAGE_SIZE),sysconf(_SC_PAGE_SIZE));
 				segments[i]=segments[loc];
-				memcpy(mem+i*sysconf(_SC_PAGE_SIZE),mem+loc*sysconf(_SC_PAGE_SIZE),sysconf(_SC_PAGE_SIZE));
+				memcpy(mem_man+i*sysconf(_SC_PAGE_SIZE),mem_man+loc*sysconf(_SC_PAGE_SIZE),sysconf(_SC_PAGE_SIZE));
 				segments[loc]=temp;
-				memcpy(mem+loc*sysconf(_SC_PAGE_SIZE),dataTemp,sysconf(_SC_PAGE_SIZE));
-				if(mprotect(mem+MEM_STRT,MEM_PROT,PROT_NONE)==-1)//protect everything
+				memcpy(mem_man+loc*sysconf(_SC_PAGE_SIZE),dataTemp,sysconf(_SC_PAGE_SIZE));
+				if(mprotect(mem_man+MEM_STRT,MEM_PROT,PROT_NONE)==-1)//protect everything
 				{
+					printf("mprotect error 3 \n");
 					perror("ERROR: ");
 					exit(1);
 				}
-				if(mprotect(mem+find*sysconf(_SC_PAGE_SIZE),sysconf(_SC_PAGE_SIZE),PROT_READ|PROT_WRITE)==-1)
+				if(mprotect(mem_man+find*sysconf(_SC_PAGE_SIZE),sysconf(_SC_PAGE_SIZE),PROT_READ|PROT_WRITE)==-1)
 				{
+					
+					printf("mprotect error 4\n");
 					perror("ERROR: ");
 					exit(1);
 				}
@@ -130,11 +135,13 @@ static void handler(int signum,siginfo_t* si,void* unused)
 				//naive and choose the one in its spot
 				memBook evict=segments[find];
 				char evictData[sysconf(_SC_PAGE_SIZE)];
-				memcpy(evictData,mem+find*sysconf(_SC_PAGE_SIZE),sysconf(_SC_PAGE_SIZE));
+				memcpy(evictData,mem_man+find*sysconf(_SC_PAGE_SIZE),sysconf(_SC_PAGE_SIZE));
 				segments[find]=swap[i];
 				char swapData[sysconf(_SC_PAGE_SIZE)];
 				if(lseek(swapfd,i*sysconf(_SC_PAGE_SIZE),SEEK_SET)<0)
 				{
+
+					printf("swap error\n");
 					perror("ERROR: ");
 					exit(1);
 				}
@@ -150,10 +157,12 @@ static void handler(int signum,siginfo_t* si,void* unused)
 					numRead+=curRead;
 				}
 				//put swap contents in mem
-				memcpy(mem+find*sysconf(_SC_PAGE_SIZE),swapData,sysconf(_SC_PAGE_SIZE));
+				memcpy(mem_man+find*sysconf(_SC_PAGE_SIZE),swapData,sysconf(_SC_PAGE_SIZE));
 				//put mem contents in swap
 				if(lseek(swapfd,i*sysconf(_SC_PAGE_SIZE),SEEK_SET)<0)
 				{
+	
+					printf("swap error 2\n");
 					perror("ERROR: ");
 					exit(1);
 				}
@@ -204,13 +213,14 @@ void* shalloc(size_t size)
 	if(meminit==0)
 	{
 		meminit=1;
-		mem=(char*)memalign(sysconf(_SC_PAGE_SIZE),MEM_SIZE);
+		mem_man=(char*)memalign(sysconf(_SC_PAGE_SIZE),MEM_SIZE);
 		//printf("mem:%p - %p\n",mem,mem+MEM_SIZE);
 		sa.sa_flags=SA_SIGINFO;
 		sigemptyset(&sa.sa_mask);
 		sa.sa_sigaction=handler;
 		if(sigaction(SIGSEGV,&sa,NULL)==-1)
 		{
+			printf("shalloc segfault error\n");
 			perror("ERROR: ");
 			exit(EXIT_FAILURE);
 		}
@@ -227,11 +237,15 @@ void* shalloc(size_t size)
 		}
 		if((swapfd=open("mem_manager.swap",O_CREAT|O_RDWR|O_TRUNC,S_IRUSR|S_IRUSR))<0)
 		{
+			
+			printf("no swap file error\n");
 			perror("ERROR: ");
 			exit(1);
 		}
 		if(lseek(swapfd,SWAP_SIZE+1,SEEK_SET)<0)
 		{
+			
+			printf("shalloc error 1\n");
 			perror("ERROR: ");
 			exit(1);
 		}
@@ -253,25 +267,25 @@ void* shalloc(size_t size)
 		memHeader new;
 		new.verify=VER;
 		new.prev=NULL;
-		new.next=mem+SHALLOC_STRT*sysconf(_SC_PAGE_SIZE)+size;
+		new.next=mem_man+SHALLOC_STRT*sysconf(_SC_PAGE_SIZE)+size;
 		new.free=0;
 		if(size+sizeof(memHeader)<=4*sysconf(_SC_PAGE_SIZE))
 		{
 			memHeader rest;
 			rest.free=1;
-			rest.prev=mem+SHALLOC_STRT*sysconf(_SC_PAGE_SIZE);
-			rest.next=mem+SHALLOC_END*sysconf(_SC_PAGE_SIZE);
-			new.next=mem+SHALLOC_STRT*sysconf(_SC_PAGE_SIZE)+size;
-			memcpy(mem+SHALLOC_STRT*sysconf(_SC_PAGE_SIZE)+size,&rest,sizeof(memHeader));
+			rest.prev=mem_man+SHALLOC_STRT*sysconf(_SC_PAGE_SIZE);
+			rest.next=mem_man+SHALLOC_END*sysconf(_SC_PAGE_SIZE);
+			new.next=mem_man+SHALLOC_STRT*sysconf(_SC_PAGE_SIZE)+size;
+			memcpy(mem_man+SHALLOC_STRT*sysconf(_SC_PAGE_SIZE)+size,&rest,sizeof(memHeader));
 		}
-		memcpy(mem+SHALLOC_STRT*sysconf(_SC_PAGE_SIZE),&new,sizeof(memHeader));
+		memcpy(mem_man+SHALLOC_STRT*sysconf(_SC_PAGE_SIZE),&new,sizeof(memHeader));
 		my_pthread_mutex_unlock(&shalloc_lock);
-		return ((void*)(mem+SHALLOC_STRT*sysconf(_SC_PAGE_SIZE)+sizeof(memHeader)));
+		return ((void*)(mem_man+SHALLOC_STRT*sysconf(_SC_PAGE_SIZE)+sizeof(memHeader)));
 	}
-	char* ptr=mem+SHALLOC_STRT*sysconf(_SC_PAGE_SIZE);
+	char* ptr=mem_man+SHALLOC_STRT*sysconf(_SC_PAGE_SIZE);
 	memHeader* bestPtr=NULL;
 	int best=sysconf(_SC_PAGE_SIZE)*4;
-	while(ptr!=mem+SHALLOC_END*sysconf(_SC_PAGE_SIZE))
+	while(ptr!=mem_man+SHALLOC_END*sysconf(_SC_PAGE_SIZE))
 	{
 		int sz;
 //printf("%p!=%p\n",ptr,mem+SHALLOC_END*sysconf(_SC_PAGE_SIZE));
@@ -317,7 +331,7 @@ void* myallocate(size_t size,char* file,int line,int type)
 	if(meminit==0)
 	{
 		meminit=1;
-		mem=(char*)memalign(sysconf(_SC_PAGE_SIZE),MEM_SIZE);
+		mem_man=(char*)memalign(sysconf(_SC_PAGE_SIZE),MEM_SIZE);
 		//printf("mem:%p - %p\n",mem,mem+MEM_SIZE);
 		//printf("header size:%lu,0x%X\n",sizeof(memHeader),(int)sizeof(memHeader));	
 		sa.sa_flags=SA_SIGINFO;
@@ -325,6 +339,8 @@ void* myallocate(size_t size,char* file,int line,int type)
 		sa.sa_sigaction=handler;
 		if(sigaction(SIGSEGV,&sa,NULL)==-1)
 		{
+			
+			printf("malloc segfault error\n");
 			perror("ERROR: ");
 			exit(EXIT_FAILURE);
 		}
@@ -341,17 +357,23 @@ void* myallocate(size_t size,char* file,int line,int type)
 		}
 		if((swapfd=open("mem_manager.swap",O_CREAT|O_RDWR|O_TRUNC,S_IRUSR|S_IWUSR))<0)
 		{
+
+			printf("malloc swap file setup  error\n");
 			perror("ERROR: ");
 			exit(1);
 		}
 		if(lseek(swapfd,SWAP_SIZE,SEEK_SET)<0)
 		{
+			
+			printf("malloc 1 error\n");
 			perror("ERROR: ");
 			exit(1);
 		}
 		write(swapfd,"",SEEK_SET);
 		if(lseek(swapfd,0,SEEK_SET)<0)
 		{
+			
+			printf("malloc 2 error\n");
 			perror("ERROR: ");
 			exit(1);
 		}
@@ -359,8 +381,11 @@ void* myallocate(size_t size,char* file,int line,int type)
 		my_pthread_mutex_init(&shalloc_lock,NULL);
 		my_pthread_mutex_init(&free_lock,NULL);
 	}
-	if(mprotect(mem+MEM_STRT,MEM_PROT,PROT_NONE)==-1)//want sig handler to put things in place for us
+	if(mprotect(mem_man+MEM_STRT,MEM_PROT,PROT_NONE)==-1)//want sig handler to put things in place for us
 	{
+			
+		printf("mprotect in malloc error.size asked is %d\n", size);
+		printf("mem is %p, MEM_STRT is %p, MEMP_PROT is %p\n", mem_man, MEM_STRT, MEM_PROT);
 		perror("ERROR: ");
 		exit(EXIT_FAILURE);
 	}
@@ -454,15 +479,15 @@ void* myallocate(size_t size,char* file,int line,int type)
 				new.verify=VER;
 				new.free=0;
 				new.prev=NULL;
-				new.next=mem+BOOK_STRT*sysconf(_SC_PAGE_SIZE)+size;
+				new.next=mem_man+BOOK_STRT*sysconf(_SC_PAGE_SIZE)+size;
 				rest.verify=VER;
 				rest.free=1;
-				rest.prev=mem+BOOK_STRT*sysconf(_SC_PAGE_SIZE);
-				rest.next=mem+(BOOK_STRT+pgReq)*sysconf(_SC_PAGE_SIZE);
-				memcpy(mem+BOOK_STRT*sysconf(_SC_PAGE_SIZE),&new,sizeof(memHeader));
-				memcpy(mem+(BOOK_STRT+pgReq)*sysconf(_SC_PAGE_SIZE)+size,&rest,sizeof(memHeader));
+				rest.prev=mem_man+BOOK_STRT*sysconf(_SC_PAGE_SIZE);
+				rest.next=mem_man+(BOOK_STRT+pgReq)*sysconf(_SC_PAGE_SIZE);
+				memcpy(mem_man+BOOK_STRT*sysconf(_SC_PAGE_SIZE),&new,sizeof(memHeader));
+				memcpy(mem_man+(BOOK_STRT+pgReq)*sysconf(_SC_PAGE_SIZE)+size,&rest,sizeof(memHeader));
 				my_pthread_mutex_unlock(&mem_lock);
-				return ((void*)(mem+BOOK_STRT*sysconf(_SC_PAGE_SIZE)+sizeof(memHeader)));
+				return ((void*)(mem_man+BOOK_STRT*sysconf(_SC_PAGE_SIZE)+sizeof(memHeader)));
 			}
 			for(i=0;i<pgReq;i++)
 			{
@@ -474,26 +499,26 @@ void* myallocate(size_t size,char* file,int line,int type)
 			new.verify=VER;
 			new.free=0;
 			new.prev=NULL;
-			new.next=mem+BOOK_STRT*sysconf(_SC_PAGE_SIZE)+size;
+			new.next=mem_man+BOOK_STRT*sysconf(_SC_PAGE_SIZE)+size;
 			rest.verify=VER;
 			rest.free=1;
-			rest.prev=mem+BOOK_STRT*sysconf(_SC_PAGE_SIZE);
-			rest.next=mem+(BOOK_STRT+pgReq)*sysconf(_SC_PAGE_SIZE);
+			rest.prev=mem_man+BOOK_STRT*sysconf(_SC_PAGE_SIZE);
+			rest.next=mem_man+(BOOK_STRT+pgReq)*sysconf(_SC_PAGE_SIZE);
 			//memcpy will trigger SIGSEGV, but handler will find the page and swap it in
-			memcpy(mem+BOOK_STRT*sysconf(_SC_PAGE_SIZE),&new,sizeof(memHeader));
-			memcpy(mem+BOOK_STRT*sysconf(_SC_PAGE_SIZE)+size,&rest,sizeof(memHeader));
+			memcpy(mem_man+BOOK_STRT*sysconf(_SC_PAGE_SIZE),&new,sizeof(memHeader));
+			memcpy(mem_man+BOOK_STRT*sysconf(_SC_PAGE_SIZE)+size,&rest,sizeof(memHeader));
 			my_pthread_mutex_unlock(&mem_lock);
-			return ((void*)(mem+BOOK_STRT*sysconf(_SC_PAGE_SIZE)+sizeof(memHeader)));
+			return ((void*)(mem_man+BOOK_STRT*sysconf(_SC_PAGE_SIZE)+sizeof(memHeader)));
 		}
 		else //we already have pages
 		{
 			//printf("--0\n");
 			//see if request fits in already owned region
-			char* ptr=mem+BOOK_STRT*sysconf(_SC_PAGE_SIZE);
+			char* ptr=mem_man+BOOK_STRT*sysconf(_SC_PAGE_SIZE);
 			char* lastPtr=NULL;
 			memHeader* bestPtr=NULL;
 			int best=INT_MAX;
-			while(ptr!=mem+(BOOK_STRT+has)*sysconf(_SC_PAGE_SIZE))//while we still own the pages
+			while(ptr!=mem_man+(BOOK_STRT+has)*sysconf(_SC_PAGE_SIZE))//while we still own the pages
 			{
 				int sz;
 				if(((memHeader*)ptr)->free!=0)
@@ -530,7 +555,7 @@ void* myallocate(size_t size,char* file,int line,int type)
 			//need to stick request at end
 			if(((memHeader*)lastPtr)->free!=0)
 			{
-				if(lastPtr+size>mem+BOOK_END*sysconf(_SC_PAGE_SIZE))
+				if(lastPtr+size>mem_man+BOOK_END*sysconf(_SC_PAGE_SIZE))
 				{
 					//surpassing max address for a thread
 					//thread cannot index past usr mem with this allocate
@@ -601,7 +626,7 @@ void* myallocate(size_t size,char* file,int line,int type)
 					memHeader rest;
 					rest.free=1;
 					rest.prev=lastPtr;
-					rest.next=mem+(BOOK_STRT+has+newReq)*sysconf(_SC_PAGE_SIZE);
+					rest.next=mem_man+(BOOK_STRT+has+newReq)*sysconf(_SC_PAGE_SIZE);
 					rest.verify=VER;
 					memcpy(lastPtr+size,&rest,sizeof(memHeader));
 					my_pthread_mutex_unlock(&mem_lock);
@@ -620,7 +645,7 @@ void* myallocate(size_t size,char* file,int line,int type)
 				memHeader rest;
 				rest.free=1;
 				rest.prev=lastPtr;
-				rest.next=mem+(BOOK_STRT+has+newReq)*sysconf(_SC_PAGE_SIZE); //!
+				rest.next=mem_man+(BOOK_STRT+has+newReq)*sysconf(_SC_PAGE_SIZE); //!
 				rest.verify=VER;
 				memcpy(lastPtr+size,&rest,sizeof(memHeader));
 				my_pthread_mutex_unlock(&mem_lock);
@@ -632,7 +657,7 @@ void* myallocate(size_t size,char* file,int line,int type)
 				//stick request on end, but not including last chunk
 				//last pointer was not free and ended right on page boundary
 				//all last ptrs will have their next point to page boundary
-				if(((memHeader*)lastPtr)->next+size+sizeof(memHeader)>mem+MEM_PROT*sysconf(_SC_PAGE_SIZE))
+				if(((memHeader*)lastPtr)->next+size+sizeof(memHeader)>mem_man+MEM_PROT*sysconf(_SC_PAGE_SIZE))
 				{
 					//cannot address than far
 					my_pthread_mutex_unlock(&mem_lock);
@@ -689,16 +714,16 @@ void* myallocate(size_t size,char* file,int line,int type)
 					memHeader new, rest;
 					new.verify=VER;
 					new.prev=lastPtr;
-					new.next=mem+(BOOK_STRT+has)*sysconf(_SC_PAGE_SIZE)+size;
+					new.next=mem_man+(BOOK_STRT+has)*sysconf(_SC_PAGE_SIZE)+size;
 					new.free=0;
 					rest.free=1;
 					rest.verify=VER;
-					rest.prev=mem+(BOOK_STRT+has)*sysconf(_SC_PAGE_SIZE);
-					rest.next=mem+(BOOK_STRT+has+pgReq)*sysconf(_SC_PAGE_SIZE);
-					memcpy(mem+(BOOK_STRT+has)*sysconf(_SC_PAGE_SIZE),&new,sizeof(memHeader));
-					memcpy(mem+(BOOK_STRT+has)*sysconf(_SC_PAGE_SIZE)+size,&rest,sizeof(memHeader));
+					rest.prev=mem_man+(BOOK_STRT+has)*sysconf(_SC_PAGE_SIZE);
+					rest.next=mem_man+(BOOK_STRT+has+pgReq)*sysconf(_SC_PAGE_SIZE);
+					memcpy(mem_man+(BOOK_STRT+has)*sysconf(_SC_PAGE_SIZE),&new,sizeof(memHeader));
+					memcpy(mem_man+(BOOK_STRT+has)*sysconf(_SC_PAGE_SIZE)+size,&rest,sizeof(memHeader));
 					my_pthread_mutex_unlock(&mem_lock);
-					return ((void*)(mem+(BOOK_STRT+has)*sysconf(_SC_PAGE_SIZE)+sizeof(memHeader)));
+					return ((void*)(mem_man+(BOOK_STRT+has)*sysconf(_SC_PAGE_SIZE)+sizeof(memHeader)));
 				}
 				for(i=0;i<pgCount;i++)
 				{
@@ -710,15 +735,15 @@ void* myallocate(size_t size,char* file,int line,int type)
 				new.free=0;
 				new.verify=VER;
 				new.prev=lastPtr;
-				new.next=mem+(BOOK_STRT+has)*sysconf(_SC_PAGE_SIZE)+size;
+				new.next=mem_man+(BOOK_STRT+has)*sysconf(_SC_PAGE_SIZE)+size;
 				rest.free=1;
 				rest.verify=VER;
-				rest.prev=mem+(BOOK_STRT+has)*sysconf(_SC_PAGE_SIZE);
-				rest.next=mem+(BOOK_STRT+has+pgReq)*sysconf(_SC_PAGE_SIZE);
-				memcpy(mem+(BOOK_STRT+has)*sysconf(_SC_PAGE_SIZE),&new,sizeof(memHeader));
-				memcpy(mem+(BOOK_STRT+has)*sysconf(_SC_PAGE_SIZE)+size,&rest,sizeof(memHeader));
+				rest.prev=mem_man+(BOOK_STRT+has)*sysconf(_SC_PAGE_SIZE);
+				rest.next=mem_man+(BOOK_STRT+has+pgReq)*sysconf(_SC_PAGE_SIZE);
+				memcpy(mem_man+(BOOK_STRT+has)*sysconf(_SC_PAGE_SIZE),&new,sizeof(memHeader));
+				memcpy(mem_man+(BOOK_STRT+has)*sysconf(_SC_PAGE_SIZE)+size,&rest,sizeof(memHeader));
 				my_pthread_mutex_unlock(&mem_lock);
-				return ((void*)(mem+(BOOK_STRT+has)*sysconf(_SC_PAGE_SIZE)+sizeof(memHeader)));
+				return ((void*)(mem_man+(BOOK_STRT+has)*sysconf(_SC_PAGE_SIZE)+sizeof(memHeader)));
 			}
 		}
 	}
@@ -729,24 +754,24 @@ void* myallocate(size_t size,char* file,int line,int type)
 			memHeader new,rest;
 			new.verify=VER;
 			new.prev=NULL;
-			new.next=mem+size;
+			new.next=mem_man+size;
 			new.free=0;
 			//don't need to check for room for rest
 			//sys will never request for all the space in one call
 			rest.verify=VER;
-			rest.prev=mem;
-			rest.next=mem+BOOK_STRT*sysconf(_SC_PAGE_SIZE);//until end of sys memory
+			rest.prev=mem_man;
+			rest.next=mem_man+BOOK_STRT*sysconf(_SC_PAGE_SIZE);//until end of sys memory
 			rest.free=1;
-			memcpy(mem,&new,sizeof(memHeader));
-			memcpy(mem+size,&rest,sizeof(memHeader));
+			memcpy(mem_man,&new,sizeof(memHeader));
+			memcpy(mem_man+size,&rest,sizeof(memHeader));
 			sysinit=1;
 		//	printf("ptr given from %p - %p\n",mem,mem+size);
-			return ((void*)(mem+sizeof(memHeader)));
+			return ((void*)(mem_man+sizeof(memHeader)));
 		}
-		char* ptr=mem;
+		char* ptr=mem_man;
 		memHeader* bestPtr=NULL;
 		int best=INT_MAX;
-		while(ptr!=mem+BOOK_STRT*sysconf(_SC_PAGE_SIZE))
+		while(ptr!=mem_man+BOOK_STRT*sysconf(_SC_PAGE_SIZE))
 		{
 			int sz;
 			if(((memHeader*)ptr)->free!=0)
@@ -788,7 +813,7 @@ void coalesce(char* ptr,int type,int has)
 	if(type==2)
 	{
 		//shalloc
-		if(prv==NULL&&(char*)nxt!=mem+SHALLOC_END*sysconf(_SC_PAGE_SIZE))//on left edge
+		if(prv==NULL&&(char*)nxt!=mem_man+SHALLOC_END*sysconf(_SC_PAGE_SIZE))//on left edge
 		{
 //			printf("-b\n");
 			if(nxt->free!=0)
@@ -798,7 +823,7 @@ void coalesce(char* ptr,int type,int has)
 			}
 			return;
 		}
-		else if((char*)nxt==mem+SHALLOC_END*sysconf(_SC_PAGE_SIZE)&&prv!=NULL)//on right edge
+		else if((char*)nxt==mem_man+SHALLOC_END*sysconf(_SC_PAGE_SIZE)&&prv!=NULL)//on right edge
 		{
 //			printf("-c\n");
 			if(prv->free!=0)
@@ -809,7 +834,7 @@ void coalesce(char* ptr,int type,int has)
 			}
 			return; 
 		}
-		else if(prv!=NULL&&(char*)nxt!=mem+SHALLOC_END*sysconf(_SC_PAGE_SIZE))//in middle
+		else if(prv!=NULL&&(char*)nxt!=mem_man+SHALLOC_END*sysconf(_SC_PAGE_SIZE))//in middle
 		{
 //			printf("-d\n");
 			if(nxt->free!=0||prv->free!=0)
@@ -835,7 +860,7 @@ void coalesce(char* ptr,int type,int has)
 	else if(type==0)
 	{
 		//sys
-		if(prv==NULL&&(char*)nxt!=mem+BOOK_STRT*sysconf(_SC_PAGE_SIZE))//on left edge
+		if(prv==NULL&&(char*)nxt!=mem_man+BOOK_STRT*sysconf(_SC_PAGE_SIZE))//on left edge
 		{
 			if(nxt->free!=0)
 			{
@@ -844,7 +869,7 @@ void coalesce(char* ptr,int type,int has)
 			}
 			return;
 		}
-		else if((char*)nxt==mem+BOOK_STRT*sysconf(_SC_PAGE_SIZE)&&prv!=NULL)//on right edge
+		else if((char*)nxt==mem_man+BOOK_STRT*sysconf(_SC_PAGE_SIZE)&&prv!=NULL)//on right edge
 		{
 			if(prv->free!=0)
 			{
@@ -854,7 +879,7 @@ void coalesce(char* ptr,int type,int has)
 			}
 			return; 
 		}
-		else if(prv!=NULL&&(char*)nxt!=mem+BOOK_STRT*sysconf(_SC_PAGE_SIZE))//in middle
+		else if(prv!=NULL&&(char*)nxt!=mem_man+BOOK_STRT*sysconf(_SC_PAGE_SIZE))//in middle
 		{
 			if(nxt->free!=0||prv->free!=0)
 			{
@@ -878,7 +903,7 @@ void coalesce(char* ptr,int type,int has)
 	else
 	{
 		//usr
-		char* pgEnd=mem+(BOOK_STRT+has)*sysconf(_SC_PAGE_SIZE);
+		char* pgEnd=mem_man+(BOOK_STRT+has)*sysconf(_SC_PAGE_SIZE);
 //		printf("pgEnd: %p,has=%d\n",pgEnd,has);
 		if(ptr==pgEnd)
 		{
@@ -937,7 +962,7 @@ void mydeallocate(void* ptr_to_mem,char* file,int line,int type)
 	memHeader* real=((memHeader*)(ptr-sizeof(memHeader)));
 	//printf("ver=%d\n",real->verify);
 	char* check=(char*)real;
-	if((signed)(check-(mem+(SHALLOC_STRT)*sysconf(_SC_PAGE_SIZE)))>=0)
+	if((signed)(check-(mem_man+(SHALLOC_STRT)*sysconf(_SC_PAGE_SIZE)))>=0)
 	{
 		//freeing from shalloc region
 		type++;
@@ -985,15 +1010,17 @@ void mydeallocate(void* ptr_to_mem,char* file,int line,int type)
 		{
 			id=curr->tid;
 		}
-		if(segments[((char*)real-mem)/sysconf(_SC_PAGE_SIZE)].tid!=id)
+		if(segments[((char*)real-mem_man)/sysconf(_SC_PAGE_SIZE)].tid!=id)
 		{
 			my_pthread_mutex_unlock(&free_lock);
 		}
 	}
 	real->free=1;
 	coalesce(ptr-sizeof(memHeader),type,has);
-	if(mprotect(mem+MEM_STRT,MEM_PROT,PROT_NONE)==-1)
+	if(mprotect(mem_man+MEM_STRT,MEM_PROT,PROT_NONE)==-1)
 	{
+	
+		printf("coalesce mprotect  error\n");
 		perror("ERROR: ");
 		exit(1);
 	}
@@ -1027,7 +1054,7 @@ void wrapper(int f1,int f2,int a1,int a2)
 //	fflush(stdout);
 	if(curr->state!=4)
 	{
-		curr->retVal=(void*)myallocate(1,__FILE__,__LINE__,0);
+		curr->retVal=(void*)shalloc(1);
 		my_pthread_exit(curr->retVal);
 	}
 	return;
@@ -1145,8 +1172,10 @@ void scheduler()
 			return;
 		}
 		//printf("-end s\n");
-		if(mprotect(mem+MEM_STRT,MEM_PROT,PROT_NONE)==-1)
+		if(mprotect(mem_man+MEM_STRT,MEM_PROT,PROT_NONE)==-1)
 		{
+		
+			printf("mprotect sched error\n");
 			perror("ERROR: ");
 			exit(1);
 		}
@@ -1400,13 +1429,13 @@ void my_pthread_exit(void* value_ptr)
 int my_pthread_join(my_pthread_t thread, void **value_ptr)
 {
 
-	my_pthread_mutex_lock(&join_lock);
 //	printf("--join\n");
 	//mark thread as waiting
 	curr->state=5;
 	//look for "thread" in terminating list
 	while(1)
 	{
+		my_pthread_mutex_lock(&join_lock);
 		if(terminating==NULL)
 		{
 			continue;

@@ -24,7 +24,7 @@ int thread_num;
 int* counter;
 pthread_t *thread;
 
-int *mem = NULL;
+int *mam = NULL;
 
 int sum = 0;
 
@@ -52,10 +52,10 @@ void external_calculate(void* arg) {
 		for (i = 0; i < itr; ++i) {
 			// read 16B from nth record into memory from mem[n*4]
 			for (j = 0; j < 4; ++j) {
-				fscanf(f, "%d", &mem[k*4 + j]);
-				pthread_mutex_lock(&mutex);
-				sum += mem[k*4 + j];
-				pthread_mutex_unlock(&mutex);
+				fscanf(f, "%d", &mam[k*4 + j]);
+				//pthread_mutex_lock(&mutex);
+				sum += mam[k*4 + j];
+				//pthread_mutex_unlock(&mutex);
 			}
 		}
 		fclose(f);
@@ -69,7 +69,7 @@ void verify() {
 	char path[20] = "./record/";
 
 	sum = 0;
-	memset(mem, 0, RAM_SIZE);
+	memset(mam, 0, RAM_SIZE);
 
 	for (k = 0; k < 10; ++k) {
 		strcpy(path, "./record/");
@@ -86,8 +86,8 @@ void verify() {
 		for (i = 0; i < itr; ++i) {
 			// read 16B from nth record into memory from mem[n*4]
 			for (j = 0; j < 4; ++j) {
-				fscanf(f, "%d\n", &mem[k*4 + j]);
-				sum += mem[k*4 + j];
+				fscanf(f, "%d\n", &mam[k*4 + j]);
+				sum += mam[k*4 + j];
 			}
 		}
 		fclose(f);
@@ -114,32 +114,35 @@ int main(int argc, char **argv) {
 	}
 
 	// initialize counter
-	counter = (int*)malloc(thread_num*sizeof(int));
+	counter = (int*)shalloc(thread_num*sizeof(int));
 	for (i = 0; i < thread_num; ++i)
 		counter[i] = i;
 
 	// initialize pthread_t
 	thread = (pthread_t*)malloc(thread_num*sizeof(pthread_t));
 
-	mem = (int*)malloc(RAM_SIZE);
-	memset(mem, 0, RAM_SIZE);
+	mam = (int*)malloc(RAM_SIZE);
+	memset(mam, 0, RAM_SIZE);
 
 	pthread_mutex_init(&mutex, NULL);
 
-	struct timespec start, end;
-    clock_gettime(CLOCK_REALTIME, &start);
+	//struct timespec start, end;
+   // clock_gettime(CLOCK_REALTIME, &start);
 
 	for (i = 0; i < thread_num; ++i)
 		pthread_create(&thread[i], NULL, &external_calculate, &counter[i]);
 
+	printf("Is it signal setting??\n");
 	signal(SIGABRT, sig_handler);
 	signal(SIGSEGV, sig_handler);
 
+
+	printf("Is it thread join?\n");
 	for (i = 0; i < thread_num; ++i)
 		pthread_join(thread[i], NULL);
 
-	clock_gettime(CLOCK_REALTIME, &end);
-    printf("running time: %lu micro-seconds\n", (end.tv_sec - start.tv_sec) * 1000 + (end.tv_nsec - start.tv_nsec) / 1000000);
+//	clock_gettime(CLOCK_REALTIME, &end);
+   // printf("running time: %lu micro-seconds\n", (end.tv_sec - start.tv_sec) * 1000 + (end.tv_nsec - start.tv_nsec) / 1000000);
 
 	printf("sum is: %d\n", sum);
 
@@ -148,7 +151,7 @@ int main(int argc, char **argv) {
 	// feel free to verify your answer here:
 	verify();
 
-	free(mem);
+	free(mam);
 	free(thread);
 	free(counter);
 
